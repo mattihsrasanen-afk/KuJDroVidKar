@@ -1,0 +1,31 @@
+KARTTASOVELLUS - macOS ASENNUS- JA KÄYTTÖOHJE
+
+Tämä ohje on optimoitu macOS-ympäristöön. Ohjelma käyttää Pythonia ja FFmpegiä, 
+jotka on asennettu Homebrew-paketinhallinnalla.
+
+1. API-AVAIN
+Hae ilmainen API-avain Maanmittauslaitokselta:
+https://www.maanmittauslaitos.fi/rajapinnat/api-avaimen-ohje
+
+2. ASENNUS
+Aja skripti päätteessä:
+chmod +x asenna_mac.sh
+./asenna_mac.sh
+
+3. KÄYTTÖ
+Käynnistä ohjelma komennolla:
+./kaynnista.sh
+
+Pääset käyttöliittymään selaimella:
+http://localhost:9000
+
+Jos haluat käyttää ohjelmaa muilla laitteilla (esim. iPad), katso Macisi 
+IP-osoite (Järjestelmäasetukset -> Verkko) ja käytä sitä:
+http://[MAC-IP-OSOITE]:9000
+
+4. MEDIAN LISÄÄMINEN
+Ohjelma lukee oletuksena Macin omat kansiot:
+Kuvat: ~/Pictures
+Videot: ~/Movies
+
+Voit muokata polkuja tiedostossa 'polut.txt'.

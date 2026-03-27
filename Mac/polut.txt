@@ -1,0 +1,13 @@
+# TÄMÄ TIEDOSTO ON UNIVERSAALI - Symboli ~ tarkoittaa nykyistä käyttäjää.
+# Älä muuta polkuja, ne toimivat suoraan kaikilla käyttäjillä.
+
+~/Pictures
+~/Movies
+
+# --- ULKOISET LEVYT ---
+# Jos käytät ulkoista levyä, poista alta # ja muuta LevynNimi
+# /Volumes/LevynNimi/Kuvat
+
+# --- GOOGLE DRIVE (macOS) ---
+# Google Drive asennettu sovelluksena löytyy yleensä täältä:
+# ~/Library/CloudStorage/GoogleDrive-OmaSähköposti@gmail.com/Omat tiedostot

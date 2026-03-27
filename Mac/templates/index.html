@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+    <meta charset="UTF-8">
+    <title>Kuvat ja Videot Kartalla - macOS Versio</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; background: #222; color: white; }
+        header { padding: 10px 20px; background: #333; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #444; }
+        #main-container { display: flex; flex: 1; overflow: hidden; position: relative; }
+        #map { flex: 1; z-index: 1; }
+        
+        #side-panel { width: 350px; background: #1a1a1a; display: none; flex-direction: column; padding: 15px; border-left: 2px solid #444; z-index: 2; box-shadow: -2px 0 10px rgba(0,0,0,0.5); }
+        #distance-info { background: #444; padding: 10px; margin-bottom: 10px; border-radius: 6px; font-weight: bold; color: #4aa3ff; border: 1px solid #555; font-size: 0.85em; font-family: 'SF Mono', Menlo, monospace; }
+        video { width: 100%; border-radius: 5px; background: black; }
+        
+        .file-list { height: 250px; overflow-y: auto; background: #111; padding: 10px; border-top: 1px solid #444; }
+        .folder-title { background: #333; padding: 6px 10px; margin-top: 10px; font-weight: bold; font-size: 0.85em; border-left: 3px solid #4aa3ff; color: #eee; }
+        .file-link { display: block; color: #4aa3ff; text-decoration: none; padding: 5px 10px; font-size: 0.85em; cursor: pointer; border-bottom: 1px solid #222; transition: background 0.2s; }
+        .file-link:hover { background: #2a2a2a; color: #70baff; }
+        
+        .map-controls { position: absolute; top: 10px; left: 60px; z-index: 1000; background: rgba(30, 30, 30, 0.85); padding: 8px; border-radius: 8px; border: 1px solid #444; backdrop-filter: blur(5px); }
+        .map-controls button { background: #4aa3ff; color: #111; border: none; padding: 6px 12px; margin: 0 4px; cursor: pointer; border-radius: 4px; font-weight: bold; font-size: 0.8em; }
+        .map-controls button:hover { background: #70baff; }
+        
+        .moving-arrow { transition: all 0.2s linear; }
+
+        /* Popup ja Galleria tyylit */
+        .img-popup { text-align: center; color: white; width: 100%; }
+        .img-popup img { max-width: 100%; border-radius: 4px; margin-top: 5px; cursor: pointer; box-shadow: 0 2px 5px rgba(0,0,0,0.3); }
+        .leaflet-popup-content-wrapper { background: #333; color: white; border-radius: 8px; }
+        .leaflet-popup-content { margin: 12px; width: 250px !important; }
+
+        #image-panel {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.92); z-index: 3000; justify-content: center; align-items: center; flex-direction: column;
+        }
+        #full-image { max-width: 92%; max-height: 82%; border: 2px solid #555; border-radius: 8px; object-fit: contain; background: #000; }
+        
+        .nav-btn {
+            position: absolute; top: 50%; transform: translateY(-50%);
+            background: rgba(255,255,255,0.1); color: white; border: none;
+            padding: 25px 15px; cursor: pointer; font-size: 35px; border-radius: 6px; transition: background 0.3s;
+        }
+        .nav-btn:hover { background: rgba(255,255,255,0.25); }
+        #prev-btn { left: 20px; }
+        #next-btn { right: 20px; }
+        #image-counter { color: #888; margin-top: 8px; font-size: 0.85em; }
+
+        .drone-wrapper { width: 30px; height: 30px; display: flex; justify-content: center; align-items: center; }
+        .drone-arrow {
+            width: 0; height: 0;
+            border-left: 10px solid transparent; border-right: 10px solid transparent;
+            border-bottom: 20px solid #ffcc00; 
+            filter: drop-shadow(0 0 3px rgba(0,0,0,0.8));
+            transform-origin: center center; display: inline-block;
+        }
+        footer { background: #1a1a1a; padding: 10px; font-size: 0.75em; text-align: center; border-top: 1px solid #333; color: #777; }
+        footer a { color: #4aa3ff; text-decoration: none; }
+    </style>
+</head>
+<body>
+<header>
+    <span style="font-weight: bold; color: #aaa;"> Mediakirjasto</span>
+    <h2 style="margin:0; font-size: 1.2em; letter-spacing: 0.5px;">Kuvat ja Videot Kartalla</h2>
+    <div>
+        <a href="https://paypal.me/MattiHSRasanenAFK" target="_blank" style="color: #ffcc00; text-decoration: none; font-weight: bold; font-size: 0.9em; margin-right: 15px;">💰 Tue kehitystä</a>
+    </div>
+</header>
+
+<div id="main-container">
+    <div id="map"></div>
+    <div class="map-controls">
+        <button onclick="toggleAllLayers(true)">Näytä kaikki</button>
+        <button onclick="toggleAllLayers(false)">Piilota kaikki</button>
+    </div>
+    <div id="side-panel">
+        <button onclick="closeVideo()" style="float:right; cursor:pointer; background:none; border:none; color:white; font-size:20px;">✕</button>
+        <h4 id="media-title" style="margin-top:0; color:#4aa3ff; font-size: 0.95em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Tiedosto</h4>
+        <div id="distance-info">Odotetaan dataa...</div>
+        <video id="player" controls autoplay></video>
+    </div>
+</div>
+
+<div class="file-list" id="file-list"></div>
+
+<div id="image-panel">
+    <span style="position:absolute; top:20px; right:30px; cursor:pointer; color:white; font-size:40px; z-index: 3100;" onclick="suljeKuva()">×</span>
+    <button id="prev-btn" class="nav-btn" onclick="vaihdaKuva(-1)">❮</button>
+    <img id="full-image" src="">
+    <button id="next-btn" class="nav-btn" onclick="vaihdaKuva(1)">❯</button>
+    <h3 id="image-caption" style="color:white; margin-top:15px; margin-bottom: 5px; font-weight: normal;"></h3>
+    <div id="image-counter"></div>
+</div>
+
+<footer>
+    <p>
+        &copy; 2026 Matti Räsänen | macOS Optimoitu | 
+        <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank">GPLv3</a> | 
+        Kartat: Maanmittauslaitos & OpenStreetMap
+    </p>
+</footer>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    // 1. ALUSTUS
+    var map = L.map('map').setView([62.0, 25.0], 6);
+    var groups = {}; 
+    var nykyinenReitti = [];
+    var nykyinenGalleria = [];
+    var nykyinenIndeksi = 0;
+    var mml_key = '{{ mml_key }}'; 
+
+    var droneIcon = L.divIcon({
+        html: '<div class="drone-wrapper"><div class="drone-arrow"></div></div>',
+        className: 'moving-arrow',
+        iconSize: [30, 30],
+        iconAnchor: [15, 15]
+    });
+    var currentDroneMarker = L.marker([0, 0], { icon: droneIcon });
+
+    // 2. KARTTAPOHJAT
+    var osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OSM' }).addTo(map);
+    var worldSatellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Esri' });
+    var ilmakuva = L.tileLayer('https://avoin-karttakuva.maanmittauslaitos.fi/avoin/wmts/1.0.0/ortokuva/default/WGS84_Pseudo-Mercator/{z}/{y}/{x}.png?api-key=' + mml_key);
+    var maastokartta = L.tileLayer('https://avoin-karttakuva.maanmittauslaitos.fi/avoin/wmts/1.0.0/maastokartta/default/WGS84_Pseudo-Mercator/{z}/{y}/{x}.png?api-key=' + mml_key);
+    var kiinteistorajat = L.tileLayer('https://avoin-karttakuva.maanmittauslaitos.fi/avoin/wmts/1.0.0/kiinteistojaotus/default/WGS84_Pseudo-Mercator/{z}/{y}/{x}.png?api-key=' + mml_key, { transparent: true, format: 'image/png' });
+
+    var baseMaps = { "OpenStreetMap": osm, "Satelliitti": worldSatellite, "MML Ilmakuva": ilmakuva, "MML Maastokartta": maastokartta };
+    var overlayMaps = { "Kiinteistörajat": kiinteistorajat };
+    var layerControl = L.control.layers(baseMaps, overlayMaps).addTo(map);
+
+    // 3. DATAN LATAUS
+    fetch('/api/data')
+        .then(res => res.json())
+        .then(data => {
+            const listDiv = document.getElementById('file-list');
+            const folders = {};
+            const kuvatSijainneittain = {};
+            window.kaikkiKuvaRyhmat = {};
+
+            data.forEach(item => {
+                // Etsitään vuosi tiedostonimestä tai polusta
+                let vuosi = item.path.match(/(19|20)\d{2}/)?.[0] || "Muut";
+                item.vuosi = vuosi;
+
+                if (!groups[vuosi]) {
+                    groups[vuosi] = { videot: L.layerGroup().addTo(map), kuvat: L.layerGroup().addTo(map) }; 
+                    layerControl.addOverlay(groups[vuosi].videot, "🎬 Videot " + vuosi);
+                    layerControl.addOverlay(groups[vuosi].kuvat, "📷 Kuvat " + vuosi);
+                }
+                
+                if (item.type === 'video' && item.route && item.route.length > 0) {
+                    L.polyline(item.route.map(p => [p.lat, p.lng]), { color: 'cyan', weight: 4, opacity: 0.7, lineJoin: 'round' })
+                     .addTo(groups[vuosi].videot)
+                     .on('click', (e) => { L.DomEvent.stopPropagation(e); playVideo(item); });
+                }
+                
+                if (item.type === 'image' && item.lat && item.lng) {
+                    let locKey = vuosi + "_" + item.lat.toFixed(5) + "_" + item.lng.toFixed(5);
+                    if (!kuvatSijainneittain[locKey]) kuvatSijainneittain[locKey] = [];
+                    kuvatSijainneittain[locKey].push(item);
+                    window.kaikkiKuvaRyhmat[locKey] = kuvatSijainneittain[locKey];
+                }
+
+                // Ryhmitellään kansioittain (esim. Pictures/Lappi -> Lappi)
+                let pathParts = item.path.split('/');
+                let folderName = pathParts.length > 2 ? pathParts[1] : pathParts[0];
+                if (!folders[folderName]) folders[folderName] = [];
+                folders[folderName].push(item);
+            });
+
+            // Piirretään kuvamarkkerit
+            Object.keys(kuvatSijainneittain).forEach(locKey => {
+                let kuvat = kuvatSijainneittain[locKey];
+                let base = kuvat[0];
+                let popupHtml = `<div class="img-popup"><strong>${kuvat.length} kuvaa tässä</strong><hr style="border:0;border-top:1px solid #555">`;
+                kuvat.forEach((k, idx) => {
+                    popupHtml += `<div style="margin-bottom:10px;">${k.name}<br><img src="/media/${k.path}" onclick="avaaGalleria(window.kaikkiKuvaRyhmat['${locKey}'], ${idx})"></div>`;
+                });
+                popupHtml += `</div>`;
+
+                L.circleMarker([base.lat, base.lng], {
+                    radius: kuvat.length > 1 ? 11 : 8,
+                    fillColor: kuvat.length > 1 ? "#e67e22" : "#ff4400",
+                    color: "#fff", weight: 2, fillOpacity: 0.9
+                }).addTo(groups[base.vuosi].kuvat).bindPopup(popupHtml);
+            });
+
+            // Rakennetaan sivulista
+            Object.keys(folders).sort().forEach(f => {
+                let div = document.createElement('div');
+                div.className = 'folder-title'; div.innerText = "📁 " + f;
+                listDiv.appendChild(div);
+                folders[f].forEach(file => {
+                    let a = document.createElement('a');
+                    a.className = 'file-link';
+                    a.innerText = (file.type === 'video' ? "🎬 " : "📷 ") + file.name;
+                    a.onclick = () => {
+                        if (file.type === 'video') {
+                            if (file.route) {
+                                map.setView([file.route[0].lat, file.route[0].lng], 15);
+                                playVideo(file);
+                            } else {
+                                alert("Videolla ei ole GPS-reittiä.");
+                            }
+                        } else {
+                            map.setView([file.lat, file.lng], 15);
+                            avaaGalleria([file], 0);
+                        }
+                    };
+                    listDiv.appendChild(a);
+                });
+            });
+        });
+
+    // 4. TOIMINNOT
+    function playVideo(item) {
+        document.getElementById('side-panel').style.display = 'flex';
+        const player = document.getElementById('player');
+        document.getElementById('media-title').innerText = item.name;
+        
+        if (item.route) {
+            laskeGpsMatkat(item.route);
+            nykyinenReitti = item.route;
+            currentDroneMarker.setLatLng([nykyinenReitti[0].lat, nykyinenReitti[0].lng]).addTo(map);
+        }
+
+        player.src = "/media/" + item.path;
+        player.play();
+    }
+
+    function closeVideo() {
+        document.getElementById('player').pause();
+        document.getElementById('side-panel').style.display = 'none';
+        if (map.hasLayer(currentDroneMarker)) map.removeLayer(currentDroneMarker);
+    }
+
+    // 5. SEURANTA
+    document.getElementById('player').addEventListener('timeupdate', function() {
+        if (!nykyinenReitti || nykyinenReitti.length < 2) return;
+        
+        const currentTime = this.currentTime;
+        let p1, p2;
+
+        for (let i = 0; i < nykyinenReitti.length - 1; i++) {
+            if (currentTime >= nykyinenReitti[i].t && currentTime <= nykyinenReitti[i+1].t) {
+                p1 = nykyinenReitti[i]; p2 = nykyinenReitti[i+1]; break;
+            }
+        }
+
+        if (p1 && p2) {
+            let pct = (currentTime - p1.t) / (p2.t - p1.t);
+            let lat = p1.lat + (p2.lat - p1.lat) * pct;
+            let lng = p1.lng + (p2.lng - p1.lng) * pct;
+            
+            currentDroneMarker.setLatLng([lat, lng]);
+
+            let uusiKulma = (Math.atan2(p2.lat - p1.lat, p2.lng - p1.lng) * 180 / Math.PI);
+            let viimeisinKulma = 90 - uusiKulma; 
+
+            const arrow = currentDroneMarker.getElement()?.querySelector('.drone-arrow');
+            if (arrow) arrow.style.transform = `rotate(${viimeisinKulma}deg)`;
+
+            let matkaAlusta = p1.kumulatiivinenMatka + ( (p2.kumulatiivinenMatka - p1.kumulatiivinenMatka) * pct );
+            let km = (matkaAlusta / 1000).toFixed(2);
+            document.getElementById('distance-info').innerText = `Aika: ${kelloMuotoon(Math.floor(currentTime))} | Matka: ${km} km`;
+        }
+    });
+
+    function laskeGpsMatkat(reitti) {
+        let summa = 0;
+        for (let i = 0; i < reitti.length; i++) {
+            if (i > 0) {
+                summa += L.latLng(reitti[i-1].lat, reitti[i-1].lng).distanceTo(L.latLng(reitti[i].lat, reitti[i].lng));
+            }
+            reitti[i].kumulatiivinenMatka = summa;
+        }
+    }
+
+    function kelloMuotoon(s) {
+        let min = Math.floor(s / 60);
+        let sek = s % 60;
+        return min + ":" + (sek < 10 ? "0" : "") + sek;
+    }
+
+    // 6. GALLERIA JA NÄPPÄIMET
+    function avaaGalleria(kuvat, indeksi) {
+        nykyinenGalleria = kuvat; nykyinenIndeksi = indeksi;
+        document.getElementById('image-panel').style.display = 'flex';
+        paivitaGalleriaNakyma();
+        document.addEventListener('keydown', kasitteleNappaimisto);
+    }
+
+    function paivitaGalleriaNakyma() {
+        const k = nykyinenGalleria[nykyinenIndeksi];
+        document.getElementById('full-image').src = "/media/" + k.path;
+        document.getElementById('image-caption').innerText = k.name;
+        document.getElementById('image-counter').innerText = (nykyinenIndeksi + 1) + " / " + nykyinenGalleria.length;
+    }
+
+    function vaihdaKuva(s) {
+        nykyinenIndeksi = (nykyinenIndeksi + s + nykyinenGalleria.length) % nykyinenGalleria.length;
+        paivitaGalleriaNakyma();
+    }
+
+    function suljeKuva() {
+        document.getElementById('image-panel').style.display = 'none';
+        document.removeEventListener('keydown', kasitteleNappaimisto);
+    }
+
+    function kasitteleNappaimisto(e) {
+        if (e.key === "ArrowLeft") vaihdaKuva(-1);
+        else if (e.key === "ArrowRight") vaihdaKuva(1);
+        else if (e.key === "Escape") suljeKuva();
+    }
+
+    function toggleAllLayers(show) {
+        Object.keys(groups).forEach(vuosi => {
+            const r = groups[vuosi];
+            if (show) {
+                if (!map.hasLayer(r.videot)) map.addLayer(r.videot);
+                if (!map.hasLayer(r.kuvat)) map.addLayer(r.kuvat);
+            } else {
+                if (map.hasLayer(r.videot)) map.removeLayer(r.videot);
+                if (map.hasLayer(r.kuvat)) map.removeLayer(r.kuvat);
+            }
+        });
+    }
+</script>
+</body>
+</html>
