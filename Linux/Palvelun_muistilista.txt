@@ -1,0 +1,5 @@
+Komento	Mitä se tekee
+sudo systemctl status kuvakartta	Katso onko palvelu päällä ja näytä viimeisimmät lokit.
+sudo systemctl restart kuvakartta	Käynnistä uudelleen (esim. jos muokkaat app.py koodia).
+sudo systemctl stop kuvakartta	Sammuta palvelu.
+journalctl -u kuvakartta -f	Seuraa palvelun tulosteita (print-lauseita) reaaliajassa.

@@ -1,0 +1,3 @@
+kuvat;~\Pictures
+videot;~\Videos
+projekti;C:\Kuvat\Metsäprojekti

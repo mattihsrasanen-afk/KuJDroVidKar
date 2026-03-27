@@ -1,0 +1,52 @@
+KARTTASOVELLUS - LINUX (DEBIAN 13) ASENNUS- JA KÄYTTÖOHJE
+
+HUOM: Tämä ohje ja asennusskriptit on optimoitu Debian 13 (Trixie) -käyttöjärjestelmälle. 
+Ohjeet toimivat todennäköisesti myös Ubuntussa ja muissa Debian-pohjaisissa järjestelmissä.
+
+Maanmittauslaitoksen sivuilta: https://www.maanmittauslaitos.fi/rajapinnat/api-avaimen-ohje
+Saat API-avaimen ilmaiseksi rekisteröitymällä käyttäjäksi.
+
+
+Ohjelmisto toimii nyt taustapalveluna. Pääset käyttämään käyttöliittymää millä tahansa samassa verkossa olevalla laitteella (tietokone, tabletti, puhelin).
+
+🌐 Osoite
+
+Kirjoita selaimen osoiteriville:
+http://[PALVELIMEN-IP-OSOITE]:9000
+
+    Esimerkki: http://192.168.1.50:9000
+	Tai: http://127.0.0.1:9000
+
+    Jos käytät selainta suoraan samalla koneella, mihin asensit ohjelman, osoite on: http://localhost:9000
+
+🛠️ Palvelun hallinta
+
+Jos haluat muokata koodia tai tarkistaa tilan, käytä seuraavia komentoja:
+
+    Tilan tarkistus: sudo systemctl status kuvakartta 
+
+    Uudelleenkäynnistys: sudo systemctl restart kuvakartta 
+
+    Lokien seuraaminen: journalctl -u kuvakartta -f 
+
+📁 Median lisääminen
+
+Ohjelma etsii automaattisesti tiedostoja seuraavista kansioista:
+
+    Kuvat: ~/Kuvat 
+
+    Videot: ~/Videot 
+
+Kun lisäät uusia tiedostoja, ne ilmestyvät kartalle automaattisesti, kun päivität selaimen sivun (F5).
+
+
+💰 Tuki ja kehitys
+Jos ohjelma on sinulle hyödyllinen ja haluat tukea sen kehitystä tai kiittää koodista, voit tehdä vapaaehtoisen lahjoituksen:
+
+FI1813115000056722
+Matti Räsänen
+Viestiin: Mediakartta-kiitos
+
+Tai PayPalin kautta:
+
+https://paypal.me/MattiHSRasanenAFK

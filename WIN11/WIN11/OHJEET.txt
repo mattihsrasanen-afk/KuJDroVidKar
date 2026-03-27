@@ -1,0 +1,74 @@
+
+Maanmittauslaitoksen sivuilta: https://www.maanmittauslaitos.fi/rajapinnat/api-avaimen-ohje
+Saat API avaimen ilmaiseksi rekisteröitymällä käyttäjäksi.
+
+KARTTASOVELLUS - WINDOWS ASENNUS- JA KÄYTTÖOHJE
+
+Tämä ohjelma lukee kuvien ja videoiden GPS-koordinaatit ja näyttää ne selaimessa Maanmittauslaitoksen kartalla.
+1. Vaatimukset
+
+    Python: Varmista, että Python on asennettu. Rastita asennusvaiheessa ehdottomasti "Add Python to PATH".
+
+    FFmpeg: Ohjelma vaatii FFmpegin videoiden reittien lukemiseen. Tässä kansiossa pitää olla alikansio ffmpeg-2026-03-22-git-9c63742425-full_build\bin\, jonka sisällä on ffmpeg.exe.
+
+2. Käyttöönotto (Ensimmäinen kerta)
+
+    Asenna tarvittavat Python-kirjastot:
+    Avaa komentokehote (cmd) tai PowerShell tässä samassa kansiossa ja aja komento:
+    pip install flask exifread
+
+    Lisää Maanmittauslaitoksen (MML) API-avain:
+    Luo tähän samaan kansioon (jossa app.py sijaitsee) uusi tekstitiedosto nimeltä mml_key.txt.
+    Kopioi API-avaimesi tiedoston sisälle ja tallenna. Älä laita tiedostoon mitään muuta tekstiä.
+    (Jos tiedostoa ei ole, ohjelma varoittaa puuttuvasta avaimesta ja kartta ei lataudu oikein).
+
+3. Mistä ohjelma etsii kuvat ja videot?
+
+Ohjelma on määritetty etsimään mediaa automaattisesti Windowsin vakiokansioista:
+
+    Kuvat: C:\Users\Käyttäjänimesi\Pictures
+
+    Videot: C:\Users\Käyttäjänimesi\Videos
+
+Kopioi näytettävät kuvat ja videot (esim. droonin tallenteet) näihin kansioihin tai niiden alikansioihin.
+4. Ohjelman käynnistäminen
+
+    Avaa komentokehote tässä kansiossa ja aja komento:
+    python app.py
+
+    Älä sulje mustaa komentorivi-ikkunaa, palvelin pyörii sen taustalla.
+
+    Avaa verkkoselain ja mene osoitteeseen: http://localhost:9000
+
+Ongelmanratkaisu
+
+    API-avain ei toimi: Varmista, että mml_key.txt on luotu oikein samaan kansioon app.py:n kanssa. Varmista myös, ettei Windows ole piilottanut tiedostopäätteitä ja luonut vahingossa tiedostoa nimeltä mml_key.txt.txt.
+
+    Videoiden reittejä ei näy: Varmista, että ffmpeg.exe on tarkalleen yllä mainitussa kansiopolussa.
+
+    Kuvat eivät näy kartalla: Varmista, että kuvissa on oikeasti GPS-sijaintitiedot (EXIF-data) tallennettuna.
+
+💰 Tuki ja kehitys
+Jos ohjelma on sinulle hyödyllinen ja haluat tukea sen kehitystä tai kiittää koodista, voit tehdä vapaaehtoisen lahjoituksen:
+
+Jos haluat muokata ohjelmaa ja tehdä asennuspaketin niin se onnistuu phyhon kääntäjällä:
+komento:
+python -m PyInstaller --noconfirm --onefile --collect-all flask --add-data "templates;templates" --add-data "static;static" app.py
+
+ja paketointi:
+https://jrsoftware.org/isdl.php/Inno-Setup-Downloads
+valmis asetus tiedosto projekti.iss avulla.
+
+
+💰 Tuki ja kehitys
+Jos ohjelma on sinulle hyödyllinen ja haluat tukea sen kehitystä tai kiittää koodista, voit tehdä vapaaehtoisen lahjoituksen:
+
+FI1813115000056722
+Matti Räsänen
+Viestiin: Mediakartta-kiitos
+
+Tai PayPalin kautta:
+
+https://paypal.me/MattiHSRasanenAFK
+
+Kiitos tuestasi!

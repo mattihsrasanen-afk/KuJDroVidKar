@@ -1,0 +1,11 @@
+# --- PAIKALLISET KANSIOT ---
+$HOME/Kuvat
+$HOME/Videot
+$HOME/Lataukset
+
+# --- ULKOISET LEVYT ---
+# /media/kayttaja/VARASTO/VanhatKuvat
+
+# --- GOOGLE DRIVE (KuJDroVidKar) ---
+#Esimerkiksi Google drive -hakemiston rivi: (poista # merkki edestä)
+#/run/user/1000/gvfs/google-drive:host=gmail.com,user=[user]/[hakemisto]
