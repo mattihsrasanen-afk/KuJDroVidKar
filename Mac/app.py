@@ -1,5 +1,5 @@
 # Copyright (C) 2026 Matti Räsänen
-# Lisensoitu GPLv3:lla. Päivitetty macOS-yhteensopivaksi.
+# Lisensoitu GPLv3:lla. Kehitetty Debian 13 (Trixie) -ympäristöön.
 
 from flask import Flask, render_template, jsonify, send_from_directory
 import os
@@ -11,13 +11,11 @@ import exifread
 
 app = Flask(__name__)
 
-# --- POLKUJEN HALLINTA ---
-# Käytetään BASE_DIR-muuttujaa, jotta polut ovat aina oikein suhteessa app.py:hyn
+# --- POLKUJEN HALLINTA (Linux-yhteensopiva) ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 KEY_FILE = os.path.join(BASE_DIR, "mml_key.txt")
 PATHS_FILE = os.path.join(BASE_DIR, "polut.txt")
 CACHE_DIR = os.path.join(BASE_DIR, "static", "cache")
-
 # Varmistetaan cache-kansion olemassaolo
 os.makedirs(CACHE_DIR, exist_ok=True)
 
@@ -32,7 +30,7 @@ def load_api_key():
     return "AVAIN_PUUTTUU"
 
 def get_media_sources():
-    """Lukee polut polut.txt-tiedostosta tai käyttää macOS-oletuksia."""
+    """Lukee polut polut.txt-tiedostosta ja laajentaa ympäristömuuttujat."""
     sources = {}
     
     if os.path.exists(PATHS_FILE):
@@ -42,44 +40,48 @@ def get_media_sources():
                 if not line or line.startswith('#'):
                     continue
                 
-                # Laajentaa ~ ja ympäristömuuttujat
+                # LAAJENNUS: Muuttaa $HOME -> /home/kayttaja
                 expanded_path = os.path.expandvars(os.path.expanduser(line))
                 
                 if os.path.exists(expanded_path):
                     name = os.path.basename(expanded_path.rstrip(os.sep)) or f"asema_{i}"
                     sources[name] = expanded_path
 
-    # macOS-kohtaiset oletuskansiot, jos polut.txt on tyhjä
     if not sources:
-        # macOS:ssä 'Kuvat' on 'Pictures' ja 'Videot' on 'Movies'
         default_kuvat = os.path.expanduser("~/Pictures")
-        default_videot = os.path.expanduser("~/Movies")
+        default_videot = os.path.expanduser("~/Movies") # Tai missä videosi ovatkaan
         
         if os.path.exists(default_kuvat):
-            sources["Kuvat (Mac)"] = default_kuvat
+            sources["Kuvat (Oletus)"] = default_kuvat
         if os.path.exists(default_videot):
-            sources["Videot (Mac)"] = default_videot
+            sources["Videot (Oletus)"] = default_videot
             
     return sources
 
 MML_API_KEY = load_api_key()
 MEDIA_SOURCES = get_media_sources()
 
-# --- METADATAN KÄSITTELY ---
+# --- REITTIEHDOT JA TOIMINNOT ---
 
 def hae_kuvan_koordinaatit(kuva_polku):
     hash_obj = hashlib.md5(kuva_polku.encode())
     cache_file = os.path.join(CACHE_DIR, f"img_{hash_obj.hexdigest()}.json")
+    
+    # UUSI OMINAISUUS: Haetaan tiedoston viimeisin muokkausaika
+    tiedoston_mtime = os.path.getmtime(kuva_polku)
 
     if os.path.exists(cache_file):
         try:
             with open(cache_file, 'r') as f:
                 data = json.load(f)
-                return data.get('lat'), data.get('lon')
+                # UUSI OMINAISUUS: JOS muokkausaika täsmää, käytetään välimuistia
+                if data.get('mtime') == tiedoston_mtime:
+                    return data.get('lat'), data.get('lon')
         except: pass
 
     lat, lon = None, None
     try:
+        import exifread
         with open(kuva_polku, 'rb') as f:
             tags = exifread.process_file(f, details=False)
             if 'GPS GPSLatitude' in tags and 'GPS GPSLongitude' in tags:
@@ -92,11 +94,13 @@ def hae_kuvan_koordinaatit(kuva_polku):
                 lon = to_decimal(tags['GPS GPSLongitude'].values)
                 if str(tags.get('GPS GPSLatitudeRef', 'N')) == 'S': lat = -lat
                 if str(tags.get('GPS GPSLongitudeRef', 'E')) == 'W': lon = -lon
+                # Säilytetään Kuvaohjelman 6 desimaalin tarkkuus julkaisussa
                 lat, lon = round(lat, 6), round(lon, 6)
     except Exception: pass
 
+    # Tallennetaan myös muokkausaika (mtime)
     with open(cache_file, 'w') as f:
-        json.dump({'lat': lat, 'lon': lon}, f)
+        json.dump({'lat': lat, 'lon': lon, 'mtime': tiedoston_mtime}, f)
     return lat, lon
 
 def hae_videon_reitti(mp4_polku):
@@ -108,7 +112,6 @@ def hae_videon_reitti(mp4_polku):
             with open(cache_file, 'r') as f: return json.load(f)
         except: pass
 
-    # macOS:ssä ffmpeg on asennettu Brew'lla, varmista että se on PATHissa
     komento = ['ffmpeg', '-y', '-i', mp4_polku, '-map', '0:s:0', '-f', 'srt', '-']
     reitti = []
     try:
@@ -134,8 +137,6 @@ def hae_videon_reitti(mp4_polku):
         return tallennettava
     return []
 
-# --- REITTIEHDOT ---
-
 @app.route('/')
 def index():
     return render_template('index.html', mml_key=MML_API_KEY)
@@ -144,16 +145,11 @@ def index():
 def get_data():
     files_data = []
     valid_cache_files = set()
-    sources = get_media_sources()
 
-    for category, base_path in sources.items():
+    for category, base_path in MEDIA_SOURCES.items():
         if not os.path.exists(base_path): continue
         for root, _, files in os.walk(base_path):
             for file in files:
-                # macOS suodatus: Ohitetaan piilotiedostot (kuten .DS_Store tai ._tiedosto)
-                if file.startswith('.'):
-                    continue
-
                 full_path = os.path.join(root, file)
                 rel_path = f"{category}/{os.path.relpath(full_path, base_path)}"
                 file_lower = file.lower()
@@ -172,7 +168,6 @@ def get_data():
                         "type": "image", "name": file, "path": rel_path, "lat": lat, "lng": lon
                     })
     
-    # Siivotaan vanhentuneet välimuistitiedostot
     if os.path.exists(CACHE_DIR):
         for cache_file in os.listdir(CACHE_DIR):
             if cache_file.endswith('.json') and cache_file not in valid_cache_files:
@@ -188,6 +183,22 @@ def serve_media(category, filename):
         return send_from_directory(sources[category], filename)
     return "Ei löydy", 404
 
+# UUSI OMINAISUUS: Tiedoston metatietojen nollaus selaimesta käsin
+@app.route('/api/refresh/<category>/<path:filename>')
+def refresh_file(category, filename):
+    sources = get_media_sources()
+    if category in sources:
+        full_path = os.path.join(sources[category], filename)
+        if os.path.exists(full_path):
+            hash_obj = hashlib.md5(full_path.encode()).hexdigest()
+            # Etsitään ja poistetaan sekä kuva- että videovälimuistit tälle polulle
+            for prefix in ['img_', 'vid_']:
+                cache_file = os.path.join(CACHE_DIR, f"{prefix}{hash_obj}.json")
+                if os.path.exists(cache_file):
+                    os.remove(cache_file)
+            return jsonify({"status": "ok", "message": "Välimuisti nollattu"})
+    return jsonify({"status": "error", "message": "Tiedostoa ei löytynyt"}), 404
+
 if __name__ == '__main__':
-    # macOS:ssä portti 9000 on vapaa ja 0.0.0.0 sallii pääsyn lähiverkosta
+    # Julkaisuversiossa Kuvaohjelman portti on 9000
     app.run(host='0.0.0.0', port=9000, debug=False)

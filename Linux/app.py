@@ -12,7 +12,6 @@ import exifread
 app = Flask(__name__)
 
 # --- POLKUJEN HALLINTA (Linux-yhteensopiva) ---
-# Käytetään BASE_DIR-muuttujaa, jotta polut ovat aina oikein suhteessa app.py:hyn
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 KEY_FILE = os.path.join(BASE_DIR, "mml_key.txt")
 PATHS_FILE = os.path.join(BASE_DIR, "polut.txt")
@@ -20,7 +19,6 @@ CACHE_DIR = os.path.join(BASE_DIR, "static", "cache")
 # Varmistetaan cache-kansion olemassaolo
 os.makedirs(CACHE_DIR, exist_ok=True)
 
-# 2. Määritellään funktiot (tämä vain kertoo Pythonille MITÄ tehdään, kun kutsutaan)
 def load_api_key():
     """Lataa API-avaimen mml_key.txt-tiedostosta."""
     if os.path.exists(KEY_FILE):
@@ -39,7 +37,6 @@ def get_media_sources():
         with open(PATHS_FILE, "r", encoding="utf-8") as f:
             for i, line in enumerate(f):
                 line = line.strip()
-                # Ohitetaan tyhjät ja kommentit
                 if not line or line.startswith('#'):
                     continue
                 
@@ -47,11 +44,9 @@ def get_media_sources():
                 expanded_path = os.path.expandvars(os.path.expanduser(line))
                 
                 if os.path.exists(expanded_path):
-                    # Käytetään kansion nimeä tai viimeistä osaa polusta
                     name = os.path.basename(expanded_path.rstrip(os.sep)) or f"asema_{i}"
                     sources[name] = expanded_path
 
-    # Jos tiedosto oli tyhjä, viallinen tai polkuja ei löytynyt, käytetään oletuksia
     if not sources:
         default_kuvat = os.path.expanduser("~/Kuvat")
         default_videot = os.path.expanduser("~/Videot")
@@ -71,12 +66,17 @@ MEDIA_SOURCES = get_media_sources()
 def hae_kuvan_koordinaatit(kuva_polku):
     hash_obj = hashlib.md5(kuva_polku.encode())
     cache_file = os.path.join(CACHE_DIR, f"img_{hash_obj.hexdigest()}.json")
+    
+    # UUSI OMINAISUUS: Haetaan tiedoston viimeisin muokkausaika
+    tiedoston_mtime = os.path.getmtime(kuva_polku)
 
     if os.path.exists(cache_file):
         try:
             with open(cache_file, 'r') as f:
                 data = json.load(f)
-                return data.get('lat'), data.get('lon')
+                # UUSI OMINAISUUS: JOS muokkausaika täsmää, käytetään välimuistia
+                if data.get('mtime') == tiedoston_mtime:
+                    return data.get('lat'), data.get('lon')
         except: pass
 
     lat, lon = None, None
@@ -94,11 +94,13 @@ def hae_kuvan_koordinaatit(kuva_polku):
                 lon = to_decimal(tags['GPS GPSLongitude'].values)
                 if str(tags.get('GPS GPSLatitudeRef', 'N')) == 'S': lat = -lat
                 if str(tags.get('GPS GPSLongitudeRef', 'E')) == 'W': lon = -lon
+                # Säilytetään Kuvaohjelman 6 desimaalin tarkkuus julkaisussa
                 lat, lon = round(lat, 6), round(lon, 6)
     except Exception: pass
 
+    # Tallennetaan myös muokkausaika (mtime)
     with open(cache_file, 'w') as f:
-        json.dump({'lat': lat, 'lon': lon}, f)
+        json.dump({'lat': lat, 'lon': lon, 'mtime': tiedoston_mtime}, f)
     return lat, lon
 
 def hae_videon_reitti(mp4_polku):
@@ -110,32 +112,26 @@ def hae_videon_reitti(mp4_polku):
             with open(cache_file, 'r') as f: return json.load(f)
         except: pass
 
-    # Haetaan tekstitysraita SRT-muodossa
     komento = ['ffmpeg', '-y', '-i', mp4_polku, '-map', '0:s:0', '-f', 'srt', '-']
     reitti = []
     try:
         tulos = subprocess.run(komento, capture_output=True, text=True, timeout=10)
-        # Etsitään lohkot: Numero, aikaleima ja koordinaatit
         blocks = tulos.stdout.replace('\r', '').split('\n\n')
         for block in blocks:
             lines = block.strip().split('\n')
             if len(lines) >= 3:
-                # Aikaleima riviltä 2 (esim. 00:00:01,000)
                 time_match = re.search(r'(\d{2}):(\d{2}):(\d{2})', lines[1])
-                # Koordinaatit viimeiseltä riviltä
                 coord_match = re.search(r'([-+]?\d+\.\d+)\s*,\s*([-+]?\d+\.\d+)', lines[-1])
                 
                 if time_match and coord_match:
                     h, m, s = map(int, time_match.groups())
                     sekunnit = h * 3600 + m * 60 + s
                     lat, lon = float(coord_match.group(1)), float(coord_match.group(2))
-                    # Suomessa lat on aina suurempi kuin lon, korjataan jos DJI kääntää ne
                     if lat < lon: lat, lon = lon, lat
                     reitti.append({"t": sekunnit, "lat": lat, "lng": lon})
     except: pass
 
     if reitti:
-        # Tallennetaan välimuistiin (otetaan joka toinen piste jos data on tiheää)
         tallennettava = reitti[::2] if len(reitti) > 100 else reitti
         with open(cache_file, 'w') as f: json.dump(tallennettava, f)
         return tallennettava
@@ -187,6 +183,22 @@ def serve_media(category, filename):
         return send_from_directory(sources[category], filename)
     return "Ei löydy", 404
 
+# UUSI OMINAISUUS: Tiedoston metatietojen nollaus selaimesta käsin
+@app.route('/api/refresh/<category>/<path:filename>')
+def refresh_file(category, filename):
+    sources = get_media_sources()
+    if category in sources:
+        full_path = os.path.join(sources[category], filename)
+        if os.path.exists(full_path):
+            hash_obj = hashlib.md5(full_path.encode()).hexdigest()
+            # Etsitään ja poistetaan sekä kuva- että videovälimuistit tälle polulle
+            for prefix in ['img_', 'vid_']:
+                cache_file = os.path.join(CACHE_DIR, f"{prefix}{hash_obj}.json")
+                if os.path.exists(cache_file):
+                    os.remove(cache_file)
+            return jsonify({"status": "ok", "message": "Välimuisti nollattu"})
+    return jsonify({"status": "error", "message": "Tiedostoa ei löytynyt"}), 404
+
 if __name__ == '__main__':
-    # Debianissa portti 9000 on määritetty palveluun
+    # Julkaisuversiossa Kuvaohjelman portti on 9000
     app.run(host='0.0.0.0', port=9000, debug=False)
