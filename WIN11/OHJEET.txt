@@ -9,7 +9,7 @@ Tämä ohjelma lukee kuvien ja videoiden GPS-koordinaatit ja näyttää ne selai
 
     Python: Varmista, että Python on asennettu. Rastita asennusvaiheessa ehdottomasti "Add Python to PATH".
 
-    FFmpeg: Ohjelma vaatii FFmpegin videoiden reittien lukemiseen. Tässä kansiossa pitää olla alikansio ffmpeg-2026-03-22-git-9c63742425-full_build\bin\, jonka sisällä on ffmpeg.exe.
+    FFmpeg: Ohjelma vaatii FFmpegin videoiden reittien lukemiseen.
 
 2. Käyttöönotto (Ensimmäinen kerta)
 

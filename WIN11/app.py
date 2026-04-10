@@ -1,142 +1,138 @@
-# Copyright (C) 2026  Matti Räsänen
-# GPLv3 Licensed
+# Copyright (C) 2026 Matti Räsänen
+# Lisensoitu GPLv3:lla. Kehitetty Debian 13 (Trixie) / Windows 11 -ympäristöön.
 
+from flask import Flask, render_template, jsonify, send_from_directory, request
+import sys
 import os
 import subprocess
 import re
 import json
 import hashlib
-import sys
-import webbrowser
+import exifread
+import time
 import tkinter as tk
 from tkinter import filedialog
-from threading import Timer
-from flask import Flask, render_template, jsonify, send_from_directory, request, redirect
 
-def hae_oikea_kansio():
-    """Palauttaa kansion, jossa .exe (tai .py) oikeasti sijaitsee."""
-    if getattr(sys, 'frozen', False):
-        # Ohjelmaa ajetaan pakattuna .exe -tiedostona
-        return os.path.dirname(sys.executable)
-    else:
-        # Ohjelmaa ajetaan normaalina Python-skriptinä
-        return os.path.dirname(os.path.abspath(__file__))
+app = Flask(__name__)
 
-BASE_DIR = hae_oikea_kansio()
-
-# Käytä BASE_DIR-muuttujaa kaikkien tallennettavien tiedostojen polkuna!
-# Esimerkiksi:
-CACHE_FILE = os.path.join(BASE_DIR, 'välimuisti.json')
-# --- POLKUJEN HALLINTA ---
+# --- POLKUJEN HALLINTA (Windows- ja PyInstaller-yhteensopiva) ---
 if getattr(sys, 'frozen', False):
     BASE_DIR = os.path.dirname(sys.executable)
-    RESOURCES_DIR = sys._MEIPASS 
-    user_data_dir = os.path.join(os.environ['LOCALAPPDATA'], 'Kuvakartta')
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    RESOURCES_DIR = BASE_DIR
-    user_data_dir = os.path.join(os.environ['LOCALAPPDATA'], 'Kuvakartta')
 
-KEY_FILE = os.path.join(user_data_dir, "mml_key.txt")
-CACHE_DIR = os.path.join(user_data_dir, "cache")
-FOLDERS_FILE = os.path.join(user_data_dir, "folders.txt")
+EXIFTOOL_PATH = os.path.join(BASE_DIR, "bin", "exiftool.exe")
+FFMPEG_PATH = os.path.join(BASE_DIR, "bin", "ffmpeg.exe")
 
-# Luodaan tarvittavat kansiot
-os.makedirs(user_data_dir, exist_ok=True)
+KEY_FILE = os.path.join(BASE_DIR, "mml_key.txt")
+PATHS_FILE = os.path.join(BASE_DIR, "polut.txt")
+CACHE_DIR = os.path.join(BASE_DIR, "static", "cache")
+
 os.makedirs(CACHE_DIR, exist_ok=True)
-
-FFMPEG_PATH = os.path.join(BASE_DIR, "ffmpeg-2026-03-22-git-9c63742425-full_build", "bin", "ffmpeg.exe")
-
-def load_extra_folders():
-    folders = {}
-    if os.path.exists(FOLDERS_FILE):
-        try:
-            with open(FOLDERS_FILE, 'r', encoding='utf-8') as f:
-                for line in f:
-                    if '|' in line:
-                        name, path = line.strip().split('|')
-                        if os.path.exists(path):
-                            folders[name] = path
-        except: pass
-    return folders
-
-def get_all_sources():
-    sources = {
-        "kuvat": os.path.expanduser("~\\Pictures"),
-        "videot": os.path.expanduser("~\\Videos")
-    }
-    sources.update(load_extra_folders())
-    return sources
-
-# --- FLASK-OLION LUONTI ---
-#app = Flask(__name__, 
-#            template_folder=os.path.join(RESOURCES_DIR, "templates"),
-#            static_folder=os.path.join(RESOURCES_DIR, "static"))
-# Yhdistetään äskeiseen BASE_DIR-logiikkaan
-template_dir = os.path.join(BASE_DIR, 'templates')
-static_dir = os.path.join(BASE_DIR, 'static')
-
-app = Flask(__name__, template_folder=template_dir, static_folder=static_dir)
-
-def load_api_key():
-    if os.path.exists(KEY_FILE):
-        with open(KEY_FILE, 'r') as f:
-            avain = f.read().strip()
-            if avain: # Jos tiedostossa on jotain...
-                return avain
-    return "AVAIN_PUUTTUU"
-
-MML_API_KEY = load_api_key()
+for f in [KEY_FILE, PATHS_FILE]:
+    if not os.path.exists(f):
+        with open(f, "w", encoding="utf-8") as tmp: pass
 
 # --- APUFUNKTIOT ---
+def load_api_key():
+    if os.path.exists(KEY_FILE):
+        try:
+            with open(KEY_FILE, 'r', encoding='utf-8') as f:
+                return f.read().strip()
+        except: pass
+    return ""
+
+def get_media_sources():
+    sources = {}
+    if os.path.exists(PATHS_FILE):
+        with open(PATHS_FILE, "r", encoding="utf-8") as f:
+            for i, line in enumerate(f):
+                line = line.strip()
+                if not line or line.startswith('#'): continue
+                expanded_path = os.path.expandvars(os.path.expanduser(line))
+                if os.path.exists(expanded_path):
+                    name = os.path.basename(expanded_path.rstrip(os.sep)) or f"asema_{i}"
+                    sources[name] = expanded_path
+    return sources
 
 def hae_kuvan_koordinaatit(kuva_polku):
-    hash_obj = hashlib.md5(kuva_polku.encode())
+    hash_obj = hashlib.md5(kuva_polku.encode('utf-8'))
     cache_file = os.path.join(CACHE_DIR, f"img_{hash_obj.hexdigest()}.json")
+    tiedoston_mtime = os.path.getmtime(kuva_polku)
 
     if os.path.exists(cache_file):
         try:
             with open(cache_file, 'r') as f:
                 data = json.load(f)
-                return data.get('lat'), data.get('lon')
+                if data.get('mtime') == tiedoston_mtime:
+                    return data.get('lat'), data.get('lon'), data.get('year')
         except: pass
 
-    lat, lon = None, None
+    lat, lon, year = None, None, None
+    
     try:
-        import exifread
         with open(kuva_polku, 'rb') as f:
             tags = exifread.process_file(f, details=False)
+            
+            # 1. Haetaan vuosi ensisijaisesti EXIF-metadatasta
+            if 'EXIF DateTimeOriginal' in tags:
+                y = str(tags['EXIF DateTimeOriginal'])[:4]
+                if y.isdigit() and 2010 <= int(y) <= 2026: year = int(y)
+            elif 'Image DateTime' in tags:
+                y = str(tags['Image DateTime'])[:4]
+                if y.isdigit() and 2010 <= int(y) <= 2026: year = int(y)
+
+            # Sijainnin käsittely
             if 'GPS GPSLatitude' in tags and 'GPS GPSLongitude' in tags:
                 def to_decimal(values):
                     def eval_frac(val):
                         return float(val.num) / float(val.den) if hasattr(val, 'num') and val.den != 0 else float(val)
                     return eval_frac(values[0]) + (eval_frac(values[1]) / 60.0) + (eval_frac(values[2]) / 3600.0)
-
                 lat = to_decimal(tags['GPS GPSLatitude'].values)
                 lon = to_decimal(tags['GPS GPSLongitude'].values)
                 if str(tags.get('GPS GPSLatitudeRef', 'N')) == 'S': lat = -lat
                 if str(tags.get('GPS GPSLongitudeRef', 'E')) == 'W': lon = -lon
-                lat, lon = round(lat, 6), round(lon, 6)
-    except Exception: pass
+                lat, lon = round(lat, 5), round(lon, 5)
+    except: pass
+    
+    # 2. Varakeino: otetaan vuosi tiedoston oikeasta luontiajasta (Windows ctime)
+    if not year:
+        tiedoston_ctime = os.path.getctime(kuva_polku)
+        y = time.localtime(tiedoston_ctime).tm_year
+        if 2010 <= y <= 2026: year = y
 
     with open(cache_file, 'w') as f:
-        json.dump({'lat': lat, 'lon': lon}, f)
-    return lat, lon
+        json.dump({'lat': lat, 'lon': lon, 'year': year, 'mtime': tiedoston_mtime}, f)
+    return lat, lon, year
 
-def hae_videon_reitti(mp4_polku):
-    hash_obj = hashlib.md5(mp4_polku.encode())
+def hae_videon_tiedot(mp4_polku):
+    hash_obj = hashlib.md5(mp4_polku.encode('utf-8'))
     cache_file = os.path.join(CACHE_DIR, f"vid_{hash_obj.hexdigest()}.json")
-
+    tiedoston_mtime = os.path.getmtime(mp4_polku)
+    
     if os.path.exists(cache_file):
         try:
-            with open(cache_file, 'r') as f: return json.load(f)
+            with open(cache_file, 'r') as f: 
+                data = json.load(f)
+                if data.get('mtime') == tiedoston_mtime:
+                    return data
         except: pass
 
     komento = [FFMPEG_PATH, '-y', '-i', mp4_polku, '-map', '0:s:0', '-f', 'srt', '-']
     reitti = []
+    year = None
+    tiedoston_nimi = os.path.basename(mp4_polku)
+    
+    # Videon vuoden tarkistus (nimi -> mtime)
+    match = re.search(r'(20\d{2})', tiedoston_nimi)
+    if match and 2010 <= int(match.group(1)) <= 2026:
+        year = int(match.group(1))
+    else:
+        y = time.localtime(tiedoston_mtime).tm_year
+        if 2010 <= y <= 2026: year = y
+
     try:
-        luonti_liput = 0x08000000 if os.name == 'nt' else 0
-        tulos = subprocess.run(komento, capture_output=True, text=True, timeout=10, creationflags=luonti_liput)
+        tulos = subprocess.run(komento, capture_output=True, text=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW)
         blocks = tulos.stdout.replace('\r', '').split('\n\n')
         for block in blocks:
             lines = block.strip().split('\n')
@@ -151,129 +147,153 @@ def hae_videon_reitti(mp4_polku):
                     reitti.append({"t": sekunnit, "lat": lat, "lng": lon})
     except: pass
 
-    if reitti:
-        tallennettava = reitti[::2] if len(reitti) > 100 else reitti
-        with open(cache_file, 'w') as f: json.dump(tallennettava, f)
-        return tallennettava
-    return []
-
-# --- REITIT (ROUTES) ---
-
+    tallennettava_reitti = reitti[::2] if len(reitti) > 100 else reitti
+    tulos_obj = {"route": tallennettava_reitti, "year": year, "mtime": tiedoston_mtime}
+    
+    with open(cache_file, 'w') as f: json.dump(tulos_obj, f)
+    return tulos_obj
+# --- REITIT ---
 @app.route('/')
 def index():
-    # Luetaan avain tiedostosta JOKAISELLA sivun latauksella
-    nykyinen_avain = load_api_key()
-    return render_template('index.html', api_key=nykyinen_avain)
+    return render_template('index.html', mml_key=load_api_key())
 
-@app.route('/api/browse')
-def browse_folder():
-    try:
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes('-topmost', True) # Tuo ikkunan muiden päälle
-        root.update() # Pakota päivitys, jotta ikkuna ei jumiudu
-        directory = filedialog.askdirectory(parent=root, title='Valitse projektikansio')
-        root.destroy()
-        
-        # Palautetaan polku oikeilla kenoviivoilla Windowsia varten
-        if directory:
-            return jsonify({"path": directory.replace('/', os.sep)})
-        return jsonify({"path": ""})
-    except Exception as e:
-        print(f"Virhe: {e}")
-        return jsonify({"path": ""})
-
-@app.route('/add_folder', methods=['POST'])
-def add_folder():
-    name = request.form.get('folder_name', '').strip()
-    path = request.form.get('folder_path', '').strip()
-    if name and path and os.path.exists(path):
-        with open(FOLDERS_FILE, 'a', encoding='utf-8') as f:
-            f.write(f"{name}|{path}\n")
-    return redirect('/')
-
-import datetime
-def hae_kuvan_vuosi(kuva_polku):
-    """Yrittää lukea kuvan alkuperäisen ottovuoden EXIF-tiedoista."""
-    try:
-        import exifread
-        with open(kuva_polku, 'rb') as f:
-            tags = exifread.process_file(f, stop_tag='EXIF DateTimeOriginal', details=False)
-            date_tag = tags.get('EXIF DateTimeOriginal') or tags.get('Image DateTime')
-            
-            if date_tag:
-                date_str = str(date_tag.values)
-                vuosi_match = re.match(r'(\d{4})', date_str)
-                if vuosi_match:
-                    return vuosi_match.group(1)
-    except Exception:
-        pass
-    
-    try:
-        mtime = os.path.getmtime(kuva_polku)
-        return str(datetime.datetime.fromtimestamp(mtime).year)
-    except:
-        return "Muut"
-
-# --- TÄMÄ ON VARSINAINEN API-REITTI ---
 @app.route('/api/data')
 def get_data():
     files_data = []
-    sources = get_all_sources()
+    valid_cache_files = set()
+    sources = get_media_sources()
+
     for category, base_path in sources.items():
         if not os.path.exists(base_path): continue
         for root, _, files in os.walk(base_path):
             for file in files:
                 full_path = os.path.join(root, file)
+                # KORJAUS: Muutetaan Windowsin kenoviivat (\) kauttaviivoiksi (/), jottei HTML/JS hajoa
+                rel_path = f"{category}/{os.path.relpath(full_path, base_path)}".replace('\\', '/')
                 file_lower = file.lower()
-                
-                # Haetaan vuosi älykkäästi (EXIF -> mtime)
-                vuosi = hae_kuvan_vuosi(full_path)
-
-                rel_path = f"{category}/{os.path.relpath(full_path, base_path).replace(os.sep, '/')}"
-                hash_obj = hashlib.md5(full_path.encode()).hexdigest()
+                hash_obj = hashlib.md5(full_path.encode('utf-8')).hexdigest()
 
                 if file_lower.endswith(('.mp4', '.mov', '.mpg')):
-                    reitti = hae_videon_reitti(full_path)
-                    files_data.append({
-                        "type": "video", "name": file, "path": rel_path, 
-                        "year": vuosi, "category": category, "route": reitti or None
-                    })
+                    valid_cache_files.add(f"vid_{hash_obj}.json")
+                    video_data = hae_videon_tiedot(full_path)
+                    reitti = video_data.get('route')
+                    vuosi = video_data.get('year')
+                    files_data.append({"type": "video", "name": file, "path": rel_path, "route": reitti or None, "year": vuosi})
                 elif file_lower.endswith(('.jpg', '.jpeg', '.png', '.avif')):
-                    lat, lon = hae_kuvan_koordinaatit(full_path)
-                    files_data.append({
-                        "type": "image", "name": file, "path": rel_path, 
-                        "year": vuosi, "category": category, "lat": lat, "lng": lon
-                    })
+                    valid_cache_files.add(f"img_{hash_obj}.json")
+                    lat, lon, vuosi = hae_kuvan_koordinaatit(full_path)
+                    files_data.append({"type": "image", "name": file, "path": rel_path, "lat": lat, "lng": lon, "year": vuosi})
     return jsonify(files_data)
+
 @app.route('/media/<category>/<path:filename>')
 def serve_media(category, filename):
-    sources = get_all_sources()
+    sources = get_media_sources()
     if category in sources:
         return send_from_directory(sources[category], filename)
-    return "Not found", 404
+    return "Ei löydy", 404
 
-@app.route('/set_key', methods=['POST'])
-def set_key():
-    key = request.form.get('api_key', '').strip()
-    if key:
-        with open(KEY_FILE, 'w') as f:
-            f.write(key)
-        # Päivitetään muuttuja lennosta, jotta ohjelmaa ei tarvitse käynnistää uudelleen
-        global MML_API_KEY
-        MML_API_KEY = key
-    return redirect('/')
+@app.route('/api/config/key', methods=['POST'])
+def save_key():
+    key = request.json.get('key', '')
+    with open(KEY_FILE, 'w', encoding='utf-8') as f:
+        f.write(key.strip())
+    return jsonify({"status": "ok"})
 
-@app.route('/clear_folders')
-def clear_folders():
-    if os.path.exists(FOLDERS_FILE):
-        os.remove(FOLDERS_FILE)
-    return redirect('/')
+@app.route('/api/config/pick_folder')
+def pick_folder():
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes('-topmost', True)
+    folder_path = filedialog.askdirectory()
+    root.destroy()
+    return jsonify({"path": folder_path})
 
-# --- KÄYNNISTYS ---
-def open_browser():
-    webbrowser.open_new("http://127.0.0.1:9000")
+@app.route('/api/config/add_folder', methods=['POST'])
+def add_folder():
+    path = request.json.get('path', '').strip()
+    if path and os.path.exists(path):
+        with open(PATHS_FILE, 'a', encoding='utf-8') as f:
+            f.write(f"\n{path}")
+        return jsonify({"status": "ok"})
+    return jsonify({"status": "error", "message": "Polkua ei ole"}), 400
+
+@app.route('/api/update_gps', methods=['POST'])
+def update_gps():
+    try:
+        data = request.json
+        paths = data.get('paths')
+        
+        # 1. Pakotetaan koordinaatit varmuudella liukuluvuiksi (float)!
+        # Jos nämä tulevat selaimelta vahingossa tekstinä, Python kaatuisi ilman tätä.
+        new_lat = float(data.get('lat'))
+        new_lon = float(data.get('lng'))
+
+        if not paths:
+            return jsonify({"status": "error", "message": "Polut puuttuvat"}), 400
+
+        sources = get_media_sources()
+        valid_files = []
+        
+        for rel_path in paths:
+            # 2. Varmistetaan, että kenoviivat ovat oikein
+            rel_path = rel_path.replace('\\', '/')
+            try:
+                # 3. Yritetään yhdistää polku fiksusti
+                if '/' in rel_path:
+                    cat, fname = rel_path.split('/', 1)
+                    if cat in sources:
+                        full_path = os.path.join(sources[cat], fname)
+                        if os.path.exists(full_path):
+                            valid_files.append(full_path)
+                else:
+                    # Jos kansiopolku puuttuu jostain syystä kokonaan
+                    for cat_path in sources.values():
+                        full_path = os.path.join(cat_path, rel_path)
+                        if os.path.exists(full_path):
+                            valid_files.append(full_path)
+                            break
+            except Exception as e:
+                print(f"[VIRHE] Polun {rel_path} käsittely: {e}")
+                continue
+
+        if not valid_files:
+            return jsonify({"status": "error", "message": "Tiedostoja ei löytynyt levyltä"}), 400
+
+        # Määritetään ilmansuunnat
+        lat_ref = 'N' if new_lat >= 0 else 'S'
+        lon_ref = 'E' if new_lon >= 0 else 'W'
+
+        komento = [
+            EXIFTOOL_PATH, '-overwrite_original',
+            f'-GPSLatitude={abs(new_lat)}', f'-GPSLatitudeRef={lat_ref}',
+            f'-GPSLongitude={abs(new_lon)}', f'-GPSLongitudeRef={lon_ref}'
+        ] + valid_files
+        
+        print(f"Suoritetaan Exiftool {len(valid_files)} kuvalle...")
+        
+        # 4. Otetaan check=True pois, jotta kaatuminen ei ole välitöntä, vaan saamme virhetekstin talteen
+        tulos = subprocess.run(komento, capture_output=True, text=True)
+        
+        if tulos.returncode != 0:
+            print(f"[EXIFTOOL VIRHE] {tulos.stderr}")
+            return jsonify({"status": "error", "message": "ExifTool virhe: " + tulos.stderr}), 500
+            
+        print("[OK] ExifTool:", tulos.stdout.strip())
+        
+        # Tyhjennetään välimuisti päivitetyiltä kuvilta
+        for fpath in valid_files:
+            hash_obj = hashlib.md5(fpath.encode('utf-8')).hexdigest()
+            cache_file = os.path.join(CACHE_DIR, f"img_{hash_obj}.json")
+            if os.path.exists(cache_file): 
+                os.remove(cache_file)
+            
+        return jsonify({"status": "ok"})
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc() # Tulostaa tarkan rivin ja syyn mustaan ruutuun!
+        return jsonify({"status": "error", "message": "Palvelinvirhe: " + str(e)}), 500
 
 if __name__ == '__main__':
-    Timer(1.5, open_browser).start()
-    app.run(host='127.0.0.1', port=9000, debug=False)
+    print(f"Palvelin käynnistyy porttiin 9000...")
+    app.run(host='0.0.0.0', port=9000, debug=False)

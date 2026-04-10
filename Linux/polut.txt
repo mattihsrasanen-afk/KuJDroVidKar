@@ -1,6 +1,6 @@
 # --- PAIKALLISET KANSIOT ---
-$HOME/Kuvat
-$HOME/Videot
+/home/wolf/Kuvat
+/home/wolf/Videot
 $HOME/Lataukset
 
 # --- ULKOISET LEVYT ---

@@ -11,8 +11,8 @@ if ! command -v brew &> /dev/null; then
 fi
 
 echo "--- Asennetaan järjestelmäriippuvuudet (macOS) ---"
-# macOS:ssä käytetään brewia apt:n sijaan
-brew install python ffmpeg
+# LISÄTTY: exiftool
+brew install python ffmpeg exiftool
 
 echo "--- Luodaan virtuaaliympäristö ja asennetaan Python-paketit ---"
 python3 -m venv venv
@@ -26,16 +26,5 @@ fi
 
 echo "--- macOS-huomio: Palvelun käynnistys ---"
 echo "macOS ei tue systemd-palveluita (kuvakartta.service)."
-echo "Voit käynnistää ohjelman manuaalisesti komennolla:"
-echo "source venv/bin/activate && python3 app.py"
+echo "Voit käynnistää ohjelman manuaalisesti skriptillä: ./kaynnista_mac.sh"
 echo "------------------------------------------"
-
-# macOS palomuuri (SocketFilterFW) on erilainen kuin Linuxin ufw/iptables.
-# Yleensä macOS kysyy lupaa portille, kun sovellus käynnistyy.
-read -p "Haluatko käynnistää sovelluksen nyt? (k/e): " vastaus
-if [[ $vastaus == "k" || $vastaus == "K" ]]; then
-    ./venv/bin/python app.py
-fi
-# Lisäysvinkki mac-skriptin loppuun:
-IP_ADDR=$(ipconfig getifaddr en0)
-echo "Pääset palveluun osoitteessa: http://$IP_ADDR:9000"
