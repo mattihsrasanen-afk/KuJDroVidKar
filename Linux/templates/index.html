@@ -593,7 +593,7 @@
         });
     }
 
-    function rakennaLista(lista, containerId, countId) {
+function rakennaLista(lista, containerId, countId) {
         if(document.getElementById(countId)) document.getElementById(countId).innerText = lista.length;
         const c = document.getElementById(containerId);
         if(!c) return;
@@ -601,15 +601,34 @@
         lista.forEach(item => {
             let div = document.createElement('div');
             div.className = 'list-item';
-            div.setAttribute('data-path', item.path); // Turvallisempi asettaa ilman muokkauksia
+            div.setAttribute('data-path', item.path); 
             
             if (valitutKuvat.has(item.path)) div.classList.add('is-selected');
 
             div.innerHTML = `<span style="font-size:16px;">${item.type === 'video' ? '🎥' : '📷'}</span> <span style="font-size:12px; word-break:break-all;">${escapeHtmlAttr(item.name)}</span>`;
+            
+            // Klikkaus avaa kuvan
             div.onclick = () => {
                 if (item.lat && item.lng) map.setView([item.lat, item.lng], 16);
-                avaaMedia(item.path, item.type);
+                avaaMedia(item.path, item.type, lista); 
             };
+
+            // TÄSSÄ UUSI LISÄYS: Hiiri menee listan kohteen päälle
+            div.onmouseenter = () => {
+                const marker = kaikkiMarkeritObjektit[item.path];
+                if (marker) {
+                    marker.fire('mouseover'); // Laukaisee karttamerkin PiP-ikkunan
+                }
+            };
+            
+            // TÄSSÄ UUSI LISÄYS: Hiiri poistuu listan kohteen päältä
+            div.onmouseleave = () => {
+                const marker = kaikkiMarkeritObjektit[item.path];
+                if (marker) {
+                    marker.fire('mouseout'); // Piilottaa PiP-ikkunan viiveellä
+                }
+            };
+
             c.appendChild(div);
         });
     }
@@ -618,7 +637,7 @@
     // LIGHTBOX JA MEDIA
     // ==========================================
 
-    function avaaMedia(path, type) {
+function avaaMedia(path, type, sourceList = null) {
         const valintatilaPäällä = document.getElementById('valintatila-cb')?.checked;
         if (valintatilaPäällä) {
             if (valitutKuvat.has(path)) valitutKuvat.delete(path);
@@ -634,16 +653,32 @@
         if (type === 'video') {
             soitaVideo(item);
         } else {
-            if (item.lat && item.lng) {
+            // TÄSSÄ UUSI LOGIIKKA
+            if (sourceList) {
+                // Jos tultiin listan kautta (vasen tai oikea paneeli), otetaan selauslistaksi kaikki sen listan kuvat
+                nykyinenKuvaLista = sourceList.filter(d => d.type !== 'video');
+            } else if (item.lat && item.lng) {
+                // Jos tultiin kartan ikonia klikkaamalla, näytetään vain samassa pisteessä olevat (vanha logiikka)
                 nykyinenKuvaLista = kaikkiData.filter(d => d.type !== 'video' && d.lat === item.lat && d.lng === item.lng);
             } else {
                 nykyinenKuvaLista = [item];
             }
+            
             if (nykyinenKuvaLista.length === 0) nykyinenKuvaLista = [item];
+            
+            // Etsitään monesko klikattu kuva on uudella listalla
             nykyinenKuvaIndeksi = nykyinenKuvaLista.findIndex(d => d.path === path);
+            
+            // Varmistus: jos klikattua kuvaa ei löydykään (esim. pelkkä video), näytetään ainakin se itse
+            if (nykyinenKuvaIndeksi === -1) {
+                nykyinenKuvaLista = [item];
+                nykyinenKuvaIndeksi = 0;
+            }
+            
             naytaLightboxKuva();
         }
     }
+
 
     function naytaLightboxKuva() {
         if (nykyinenKuvaLista.length === 0) return;

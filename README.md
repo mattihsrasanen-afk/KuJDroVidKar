@@ -43,3 +43,8 @@ Ohjelma hyödyntää Maanmittauslaitoksen avoimia aineistoja. Käyttämällä t�
 ## 💰 Tuki (Support)
 
 Jos haluat tukea ohjelman kehitystä, voit tehdä lahjoituksen täällä: https://paypal.me/MattiHSRasanenAFK
+
+Tavallinen tilisiirto:
+FI1813115000056722
+Matti Räsänen
+Viestiin: Mediakartta-kiitos
