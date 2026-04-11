@@ -9,26 +9,55 @@ import re
 import json
 import hashlib
 import exifread
+import webbrowser
+from threading import Timer
 import time
 import tkinter as tk
 from tkinter import filedialog
 
-app = Flask(__name__)
+try:
+    if getattr(sys, 'frozen', False):
+        desktop = os.path.join(os.path.expanduser("~"), "Desktop")
+        log_file = open(os.path.join(desktop, "kuvakartta_virhe.txt"), "a", encoding="utf-8")
+        log_file.write(f"\n--- Käynnistysyritys: {datetime.datetime.now()} ---\n")
+        sys.stderr = log_file
+except Exception:
+    pass
 
-# --- POLKUJEN HALLINTA (Windows- ja PyInstaller-yhteensopiva) ---
+# --- 2. ÄLYKÄS POLKUJEN RATKAISU ---
 if getattr(sys, 'frozen', False):
     BASE_DIR = os.path.dirname(sys.executable)
+    # PyInstaller 6+ laittaa kansiot _internal-kansioon, vanhemmat exe:n viereen
+    if os.path.exists(os.path.join(BASE_DIR, "_internal", "templates")):
+        DATA_DIR = os.path.join(BASE_DIR, "_internal")
+    else:
+        DATA_DIR = BASE_DIR
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    DATA_DIR = BASE_DIR
 
-EXIFTOOL_PATH = os.path.join(BASE_DIR, "bin", "exiftool.exe")
-FFMPEG_PATH = os.path.join(BASE_DIR, "bin", "ffmpeg.exe")
+# Työkalujen polut
+FFMPEG_PATH = os.path.join(DATA_DIR, "bin", "ffmpeg.exe")
+EXIFTOOL_PATH = os.path.join(DATA_DIR, "bin", "exiftool.exe")
 
+# Varmistetaan lokaatio ja kirjoitetaan lokiin, jos tärkeitä kansioita puuttuu
+if getattr(sys, 'frozen', False):
+    sys.stderr.write(f"BASE_DIR on: {BASE_DIR}\n")
+    sys.stderr.write(f"DATA_DIR on: {DATA_DIR}\n")
+    if not os.path.exists(os.path.join(DATA_DIR, "templates")):
+        sys.stderr.write(f"KRIITTINEN VIRHE: templates-kansiota ei löydy osoitteesta {DATA_DIR}\n")
+
+# Alustetaan Flask uusilla, älykkäillä poluilla
+app = Flask(__name__, 
+            template_folder=os.path.join(DATA_DIR, "templates"),
+            static_folder=os.path.join(DATA_DIR, "static"))
+
+# Nämä säilyvät BASE_DIR alla (käyttäjän omat tiedostot exe:n vieressä)
 KEY_FILE = os.path.join(BASE_DIR, "mml_key.txt")
 PATHS_FILE = os.path.join(BASE_DIR, "polut.txt")
-CACHE_DIR = os.path.join(BASE_DIR, "static", "cache")
-
+CACHE_DIR = os.path.join(DATA_DIR, "static", "cache")
 os.makedirs(CACHE_DIR, exist_ok=True)
+
 for f in [KEY_FILE, PATHS_FILE]:
     if not os.path.exists(f):
         with open(f, "w", encoding="utf-8") as tmp: pass
@@ -296,4 +325,8 @@ def update_gps():
 
 if __name__ == '__main__':
     print(f"Palvelin käynnistyy porttiin 9000...")
+    
+    # Avataan selain automaattisesti 1.5 sekunnin viiveellä
+    Timer(1.5, lambda: webbrowser.open_new("http://localhost:9000")).start()
+    
     app.run(host='0.0.0.0', port=9000, debug=False)

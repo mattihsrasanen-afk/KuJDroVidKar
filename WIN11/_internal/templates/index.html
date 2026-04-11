@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+    <meta charset="UTF-8">
+    <title>Kuvat ja videot karttalla</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.Default.css" />
+    
+    <style>
+        :root { --side-width: 330px; --accent: #5db0ff; --selected: #9b59b6; --bg: #111; }
+        body, html { margin: 0; padding: 0; height: 100vh; width: 100%; overflow: hidden; background: var(--bg); color: #eee; font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; }
+        
+        .donation-bar { background: #27ae60; color: white; text-align: center; padding: 6px; font-weight: bold; font-size: 13px; z-index: 2000; box-shadow: 0 0 10px rgba(0,0,0,0.5); }
+        .donation-bar a { color: #fff; text-decoration: underline; }
+        .donation-bar a:hover { color: #f1c40f; }
+
+        header { padding: 10px 20px; background: #333; display: flex; align-items: center; justify-content: space-between; z-index: 1000; border-bottom: 2px solid #444; }
+        #app-wrapper { display: flex; flex: 1; width: 100vw; align-items: stretch; overflow: hidden; }
+        
+        #left-panel, #right-panel { width: var(--side-width); background: #1a1a1a; display: flex; flex-direction: column; z-index: 10; border-right: 1px solid #444; }
+        #right-panel { border-right: none; border-left: 1px solid #444; }
+        
+        #map-container { flex: 1; position: relative; background: #000; display: flex; }
+        #map { flex: 1; height: 100%; width: 100%; }
+
+        .settings-box { background: #222; padding: 12px; border-bottom: 2px solid #444; }
+        .settings-row { margin-bottom: 10px; display: flex; flex-direction: column; gap: 5px; }
+        .settings-row input { background: #000; border: 1px solid #444; color: #fff; padding: 5px; border-radius: 4px; font-size: 12px; }
+        
+        .filter-panel { background: #1a1a1a; padding: 10px; border-bottom: 1px solid #444; }
+        .filter-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; font-size: 12px; }
+        .filter-group { display: flex; gap: 8px; background: #000; padding: 4px 8px; border-radius: 4px; }
+        
+        .adv-btn { border: none; padding: 8px; border-radius: 4px; font-size: 12px; font-weight: bold; color: white; cursor: pointer; text-align: center; width: 100%; }
+        .btn-blue { background: #3498db; }
+        .btn-green { background: #27ae60; }
+        .btn-orange { background: #e67e22; }
+        .adv-btn:hover { filter: brightness(1.2); }
+
+        .list-item { padding: 8px; border-bottom: 1px solid #333; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: background 0.2s; }
+        .list-item:hover { background: #2a2a2a; }
+        .list-item.is-selected { background: var(--selected) !important; }
+        .list-item.is-hovered { background: #3a3a3a !important; border-left: 4px solid var(--accent); padding-left: 4px; }
+        
+        #video-player-container { position: absolute; top: 20px; left: 20px; background: rgba(0,0,0,0.9); border: 2px solid var(--accent); border-radius: 8px; padding: 10px; z-index: 1000; display: none; width: 320px; box-shadow: 0 10px 30px rgba(0,0,0,0.8); }
+        #video-player-container video { width: 100%; border-radius: 4px; }
+        
+        #lightbox { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.95); z-index: 9999; flex-direction: column; align-items: center; justify-content: center; }
+        .lb-media { max-width: 90vw; max-height: 85vh; border: 2px solid var(--accent); border-radius: 4px; box-shadow: 0 0 20px rgba(0,0,0,0.8); }
+        
+        .lb-nav-btn { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(0,0,0,0.6); border: 2px solid #555; color: white; font-size: 30px; cursor: pointer; padding: 15px 20px; z-index: 10001; border-radius: 8px; transition: 0.2s; }
+        .lb-nav-btn:hover { background: rgba(0,0,0,0.9); border-color: var(--accent); color: var(--accent); }
+        #lb-prev { left: 20px; }
+        #lb-next { right: 20px; }
+        
+        #lb-close { position: absolute; top: 20px; right: 20px; background: rgba(0,0,0,0.6); border: 2px solid #555; color: white; font-size: 24px; cursor: pointer; padding: 8px 15px; border-radius: 8px; transition: 0.2s; z-index: 10001; }
+        #lb-close:hover { background: red; border-color: red; }
+        
+        #lb-counter { position: absolute; top: 25px; left: 30px; color: white; font-weight: bold; font-size: 18px; z-index: 10001; background: rgba(0,0,0,0.5); padding: 5px 10px; border-radius: 4px; }
+
+        .drone-wrapper { width: 40px; height: 40px; display: flex; justify-content: center; align-items: center; }
+        .drone-arrow { width: 0; height: 0; border-left: 10px solid transparent; border-right: 10px solid transparent; border-bottom: 25px solid #ffaa00; position: relative; transition: transform 0.1s linear; filter: drop-shadow(0px 0px 5px rgba(0,0,0,0.8)); }
+
+        .pip-tooltip { background: #111; border: 2px solid var(--accent); padding: 5px; border-radius: 6px; box-shadow: 0 5px 15px rgba(0,0,0,0.8); pointer-events: auto !important; }
+        .pip-tooltip::before { display: none; }
+        
+        .marker-selected .marker-bg { background: var(--selected) !important; border-radius: 50%; box-shadow: 0 0 15px var(--selected); border: 2px solid #fff; }
+        .marker-moving .marker-bg { animation: pulse 1s infinite alternate; cursor: move; }
+        
+        @keyframes pulse { from { transform: scale(1); } to { transform: scale(1.1); box-shadow: 0 0 25px currentColor; } }
+        
+        .floating-panel { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.95); padding: 12px 25px; border-radius: 30px; z-index: 2000; display: none; align-items: center; gap: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.8); }
+        #selection-panel { border: 2px solid var(--selected); }
+        #move-panel { border: 2px solid #e67e22; }
+    </style>
+</head>
+<body>
+
+<div class="donation-bar">
+    💖 Kehityksen tukeminen: <a href="https://paypal.me/MattiHSRasanenAFK" target="_blank">Lahjoita PayPalilla</a> tai <a href="javascript:void(0)" onclick="naytaKrypto()">Kryptolahjoitus</a> 💖
+</div>
+
+<header>
+    <h2 style="margin:0;">📸🎥 Kuvat ja videot karttalla By Matti Räsänen - Windows 11</h2>
+    <div style="font-size: 12px; color: #aaa;">Matti Räsänen &copy; 2026</div>
+</header>
+
+<div id="app-wrapper">
+    <div id="left-panel">
+        <div style="padding:10px; background:#111; border-bottom:1px solid #444;">📍 Lähialue (<span id="left-count">0</span>)</div>
+        <div id="local-file-list" style="overflow-y:auto; flex:1;"></div>
+    </div>
+
+    <div id="map-container">
+        <div id="map"></div>
+        
+        <div id="selection-panel" class="floating-panel">
+            <span style="font-weight:bold; font-size:14px;">Massa-valinta: <span id="sel-count" style="color:var(--selected); font-size:18px;">0</span> kuvaa</span>
+            <button class="adv-btn btn-orange" onclick="aloitaMassaSiirto()" style="width:auto; padding: 6px 15px;">📍 Siirrä vapaasti</button>
+            <button class="adv-btn" onclick="tyhjennaValinnat()" style="width:auto; background:#e74c3c; padding: 6px 15px;">Peruuta</button>
+        </div>
+
+        <div id="move-panel" class="floating-panel">
+            <span id="move-text" style="font-weight:bold; font-size:14px; color:#e67e22;">Raahaa merkki uuteen paikkaan...</span>
+            <button class="adv-btn btn-green" onclick="tallennaSiirto()" style="width:auto; padding: 6px 15px;">Tallenna EXIF-tietoihin</button>
+            <button class="adv-btn" onclick="peruutaSiirto()" style="width:auto; background:#e74c3c; padding: 6px 15px;">Peruuta</button>
+        </div>
+
+        <div id="video-player-container">
+            <button onclick="suljeVideo()" style="float:right; background:red; color:white; border:none; cursor:pointer; padding:5px 10px;">X</button>
+            <div id="video-title" style="font-weight: bold; margin-bottom: 5px; font-size:12px;">Video</div>
+            <video id="active-video" controls></video>
+        </div>
+    </div>
+
+   <div id="right-panel">
+        <div style="padding:10px; background:#111; border-bottom:1px solid #444; font-weight:bold;">⚙️ Asetukset</div>
+        <div class="settings-box">
+            <div class="settings-row">
+                <label style="font-size:11px; font-weight:bold;">MML API-AVAIN:</label>
+                <div style="display:flex; gap:5px;">
+                    <input type="password" id="api-key-input" value="{{ mml_key }}" style="flex:1;">
+                    <button class="adv-btn btn-green" onclick="tallennaAvain()" style="width:auto;">Tallenna</button>
+                </div>
+            </div>
+            <button class="adv-btn btn-blue" onclick="valitseKansio()">➕ Lisää kansio hiirellä</button>
+            
+            <label style="display:block; margin-top:10px; cursor:pointer; font-weight:bold; color:var(--selected); background:#000; padding:8px; border-radius:4px; text-align:center; border:1px solid #444;">
+                <input type="checkbox" id="valintatila-cb" onchange="toggleValintaPaneeli()"> 🎯 Monivalintatila
+            </label>
+        </div>
+
+        <div style="padding:10px; background:#111; border-bottom:1px solid #444; font-weight:bold;">🔍 Suodatus</div>
+        <div class="filter-panel" style="display: flex; flex-direction: column; gap: 8px;">
+            <div class="filter-group" style="display: flex; justify-content: space-between; font-size: 11px;">
+                <label style="cursor:pointer;"><input type="radio" name="locFilter" value="all" checked onchange="paivitaKartta()"> Kaikki</label>
+                <label style="cursor:pointer;"><input type="radio" name="locFilter" value="has_loc" onchange="paivitaKartta()"> Sijainti</label>
+                <label style="cursor:pointer;"><input type="radio" name="locFilter" value="no_loc" onchange="paivitaKartta()"> Ei sijaintia</label>
+            </div>
+            <div class="filter-group" style="display: flex; justify-content: space-between; font-size: 11px; background: #222;">
+                <label style="cursor:pointer;"><input type="radio" name="typeFilter" value="all" checked onchange="paivitaKartta()"> Kaikki</label>
+                <label style="cursor:pointer;"><input type="radio" name="typeFilter" value="jpg" onchange="paivitaKartta()"> JPG</label>
+                <label style="cursor:pointer;"><input type="radio" name="typeFilter" value="video" onchange="paivitaKartta()"> Videot</label>
+                <label style="cursor:pointer;"><input type="radio" name="typeFilter" value="other" onchange="paivitaKartta()"> Muut</label>
+            </div>
+        </div>
+        
+        <div style="padding:10px; background:#111; border-bottom:1px solid #444; font-weight:bold;">🗂️ Kaikki tiedostot (<span id="right-count">0</span>)</div>
+        <div id="all-file-list" style="overflow-y:auto; flex:1; background:#1a1a1a;"></div>
+    </div>
+</div>
+
+<footer style="background: #222; padding: 6px 20px; text-align: center; border-top: 1px solid #444; font-size: 11px; color: #888; z-index: 1000; flex-shrink: 0; line-height: 1.4;">
+    Kuvakartta Pro Windows &copy; 2026 Matti Räsänen | Lisensoitu GPLv3:lla. Kehitetty Debian 13 / Windows 11 -ympäristöihin.<br>
+    <span style="color: #666;">Sisältää Maanmittauslaitoksen avoimen tietoaineiston kartta-aineistoja (CC BY 4.0 -lisenssi).</span>
+</footer>
+
+<div id="lightbox" onclick="suljeLightbox()">
+    <div id="lb-counter">Kuva 1 / 1</div>
+    <button id="lb-close" onclick="suljeLightbox()">✖</button>
+    <button id="lb-prev" class="lb-nav-btn" onclick="vaihdaKuva(-1, event)">&#10094;</button>
+    <img id="lightbox-img" class="lb-media" src="" onclick="event.stopPropagation()">
+    <button id="lb-next" class="lb-nav-btn" onclick="vaihdaKuva(1, event)">&#10095;</button>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
+
+<script>
+    let kaikkiData = [];
+    let reittiViivat = [];
+    
+    // TILAMUUTTUJAT VALINTAAN JA SIIRTOON
+    let valitutKuvat = new Set();
+    let kaikkiMarkeritObjektit = {}; 
+    
+    let siirtoMerkki = null;
+    let aktiivinenSiirtoTila = false; 
+    let siirrettavatPolut = [];
+    
+    // PiP-IKKUNA
+    let pipViive;
+    const pipTooltip = L.tooltip({
+        direction: 'top', 
+        offset: [0, -40], 
+        className: 'pip-tooltip', 
+        interactive: true
+    });
+
+    document.addEventListener('mouseover', (e) => {
+        if (e.target.closest('.pip-tooltip')) clearTimeout(pipViive);
+    });
+    document.addEventListener('mouseout', (e) => {
+        if (e.target.closest('.pip-tooltip')) {
+            pipViive = setTimeout(() => {
+                if (map.hasLayer(pipTooltip)) map.closeTooltip(pipTooltip);
+            }, 300);
+        }
+    });
+
+    const markerClusterGroup = L.markerClusterGroup();
+    const map = L.map('map', { center: [62.89, 27.68], zoom: 6 });
+    
+    let nykyinenKuvaLista = [];
+    let nykyinenKuvaIndeksi = 0;
+    
+    // --- KARTTATASOT ---
+    const mmlKey = document.getElementById('api-key-input').value;
+    const mmlWmtsUrl = `https://avoin-karttakuva.maanmittauslaitos.fi/avoin/wmts/1.0.0/{layer}/default/WGS84_Pseudo-Mercator/{z}/{y}/{x}.png?api-key=${mmlKey}`;
+    const mmlOrtoWmsUrl = `https://avoin-karttakuva.maanmittauslaitos.fi/ortokuvat-ja-korkeusmallit/wms/v2?api-key=${mmlKey}`;
+    
+    const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
+    osmLayer.addTo(map);
+
+    const mmlMaasto = L.tileLayer(mmlWmtsUrl.replace('{layer}', 'maastokartta'), { maxZoom: 18, attribution: 'Maanmittauslaitos' });
+    const mmlTausta = L.tileLayer(mmlWmtsUrl.replace('{layer}', 'taustakartta'), { maxZoom: 18, attribution: 'Maanmittauslaitos' });
+    const mmlSelko = L.tileLayer(mmlWmtsUrl.replace('{layer}', 'selkokartta'), { maxZoom: 18, attribution: 'Maanmittauslaitos' });
+    const mmlKiinteisto = L.tileLayer(mmlWmtsUrl.replace('{layer}', 'kiinteistojaotus'), { minZoom: 13, maxZoom: 18, zIndex: 1000, attribution: 'Maanmittauslaitos' });
+    const mmlIlmakuva = L.tileLayer(mmlWmtsUrl.replace('{layer}', 'ortokuva'), { maxZoom: 18, attribution: 'Maanmittauslaitos' });
+
+    const layerControl = L.control.layers({"OpenStreetMap": osmLayer, "MML Maastokartta": mmlMaasto, "MML Taustakartta": mmlTausta, "MML Ilmakuva": mmlIlmakuva}, {"🔴 Kiinteistörajat (Zoomaa lähelle)": mmlKiinteisto}, { collapsed: false }).addTo(map);    map.addLayer(markerClusterGroup);
+    mmlKiinteisto.addTo(map);
+
+    let ilmakuvaTasot = {};
+
+    function lataaData() {
+        fetch('/api/data').then(r => r.json()).then(data => {
+            // POMMINKESTÄVÄ KORJAUS 1: Siivotaan polut turvallisiksi jo täällä
+            kaikkiData = data.map(item => {
+                if(item.path) item.path = item.path.replace(/\\/g, '/');
+                return item;
+            });
+            paivitaKartta();
+        }).catch(err => console.error("Virhe ladattaessa dataa:", err));
+    }
+
+    function escapeHtmlAttr(str) {
+        if (!str) return "";
+        return str.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    // ==========================================
+    // VALINTATILAN JA SIIRTOJEN LOGIIKKA
+    // ==========================================
+
+    function toggleValintaPaneeli() {
+        const isChecked = document.getElementById('valintatila-cb')?.checked;
+        document.getElementById('selection-panel').style.display = isChecked ? 'flex' : 'none';
+        
+        if (!isChecked) {
+            valitutKuvat.clear();
+            peruutaSiirto(); 
+        }
+        paivitaValintaUI();
+    }
+
+    function paivitaValintaUI() {
+        if(document.getElementById('sel-count')) {
+            document.getElementById('sel-count').innerText = valitutKuvat.size;
+        }
+    }
+
+    function tyhjennaValinnat() {
+        const cb = document.getElementById('valintatila-cb');
+        if(cb) cb.checked = false;
+        toggleValintaPaneeli();
+    }
+
+    function aloitaYksittainenSiirto(path, event) {
+        if (event) event.stopPropagation(); 
+        if (map.hasLayer(pipTooltip)) map.closeTooltip(pipTooltip);
+        
+        const marker = kaikkiMarkeritObjektit[path];
+        if (!marker) return;
+        
+        aktiivinenSiirtoTila = 'single';
+        siirrettavatPolut = [path];
+        marker.unbindTooltip();
+        
+        marker.dragging.enable();
+        marker.setIcon(L.divIcon({
+            className: 'custom-div-icon marker-moving',
+            html: `<div class="marker-bg" style="font-size:24px; width:35px; height:35px; display:flex; align-items:center; justify-content:center; background:#e67e22; border-radius:50%; box-shadow:0 0 15px #e67e22; border:2px solid #fff;">🎯</div>`,
+            iconSize: [35, 35], iconAnchor: [17, 17]
+        }));
+        
+        siirtoMerkki = marker;
+        document.getElementById('move-text').innerText = 'Raahaa kuva uuteen paikkaan';
+        document.getElementById('move-panel').style.display = 'flex';
+    }
+
+    function aloitaMassaSiirto() {
+        if (valitutKuvat.size === 0) return alert("Valitse ensin kuvia kartalta!");
+        
+        aktiivinenSiirtoTila = 'multi';
+        siirrettavatPolut = Array.from(valitutKuvat);
+        document.getElementById('selection-panel').style.display = 'none';
+        
+        const center = map.getCenter();
+        siirtoMerkki = L.marker(center, {
+            draggable: true,
+            icon: L.divIcon({
+                className: 'custom-div-icon marker-moving',
+                html: `<div class="marker-bg" style="font-size:30px; width:45px; height:45px; display:flex; align-items:center; justify-content:center; background:#e74c3c; border-radius:50%; box-shadow:0 0 20px #e74c3c; border:2px solid #fff;">🎯</div>`,
+                iconSize: [45, 45], iconAnchor: [22, 22]
+            })
+        }).addTo(map);
+        
+        document.getElementById('move-text').innerHTML = `Raahaa tähtäintä. <b style="color:#fff;">${siirrettavatPolut.length} kuvaa</b> siirtyy tähän.`;
+        document.getElementById('move-panel').style.display = 'flex';
+    }
+
+    async function yhdistaValitutTahan(lat, lng, event) {
+        if (event) event.stopPropagation();
+        if (map.hasLayer(pipTooltip)) map.closeTooltip(pipTooltip);
+        
+        if (valitutKuvat.size === 0) return;
+        const paths = Array.from(valitutKuvat);
+        
+        if (!confirm(`Haluatko varmasti yhdistää ${paths.length} valittua kuvaa tähän kohdepisteeseen?\n\nTämä tallentaa koordinaatit heti suoraan EXIF-tietoihin.`)) return;
+        
+        try {
+            const res = await fetch('/api/update_gps', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ lat: lat, lng: lng, paths: paths })
+            });
+            
+            if (res.ok) {
+                alert(`Mahtavaa! ${paths.length} kuvan sijainti päivitetty.`);
+                valitutKuvat.clear();
+                siivotaanSiirtoUI();
+                lataaData(); 
+            } else {
+                alert("Virhe tallennettaessa sijaintia backendissä.");
+            }
+        } catch (err) {
+            console.error(err);
+            alert("Yhteysvirhe backend-palvelimeen!");
+        }
+    }
+
+    async function tallennaSiirto() {
+        if (!siirtoMerkki || siirrettavatPolut.length === 0) return;
+        const pos = siirtoMerkki.getLatLng();
+        
+        try {
+            const res = await fetch('/api/update_gps', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ lat: pos.lat, lng: pos.lng, paths: siirrettavatPolut })
+            });
+            
+            if (res.ok) {
+                alert("Uusi sijainti tallennettu onnistuneesti kuvien metatietoihin!");
+                valitutKuvat.clear();
+                siivotaanSiirtoUI();
+                lataaData(); 
+            } else {
+                alert("Virhe tallennettaessa sijaintia backendissä.");
+            }
+        } catch (err) {
+            console.error(err);
+            alert("Yhteysvirhe backend-palvelimeen!");
+        }
+    }
+
+    function peruutaSiirto() {
+        siivotaanSiirtoUI();
+        paivitaKartta(); 
+    }
+
+    function siivotaanSiirtoUI() {
+        if (aktiivinenSiirtoTila === 'multi' && siirtoMerkki) {
+            map.removeLayer(siirtoMerkki);
+        } else if (aktiivinenSiirtoTila === 'single' && siirtoMerkki) {
+            siirtoMerkki.dragging.disable();
+        }
+        siirtoMerkki = null;
+        siirrettavatPolut = [];
+        aktiivinenSiirtoTila = false;
+        document.getElementById('move-panel').style.display = 'none';
+        
+        if (document.getElementById('valintatila-cb')?.checked) {
+            document.getElementById('selection-panel').style.display = 'flex';
+            paivitaValintaUI();
+        }
+    }
+
+// ==========================================
+    // KARTAN PÄIVITYS JA KUUNTELU
+    // ==========================================
+
+    map.on('overlayadd', function(e) { if (e.name.includes('Vuosi')) paivitaKartta(); });
+    map.on('overlayremove', function(e) { if (e.name.includes('Vuosi')) paivitaKartta(); });
+
+    function paivitaKartta() {
+        markerClusterGroup.clearLayers();
+        kaikkiMarkeritObjektit = {}; 
+        reittiViivat.forEach(l => map.removeLayer(l));
+        reittiViivat = [];
+        
+// POMMINKESTÄVÄ KORJAUS 2: Turvallinen arvojen haku jos elementtiä ei löydy
+        const locFilter = document.querySelector('input[name="locFilter"]:checked')?.value || 'all';
+        const typeFilter = document.querySelector('input[name="typeFilter"]:checked')?.value || 'all';
+        
+        // 1. Selvitetään mitkä vuodet on ruksitettu karttatasovalikosta
+        let valitutVuodetKartalla = new Set();
+        for (let y = 2010; y <= 2026; y++) {
+            if (ilmakuvaTasot[y] && map.hasLayer(ilmakuvaTasot[y])) {
+                valitutVuodetKartalla.add(y);
+            }
+        }
+
+        let loydetytVuodet = new Set(); 
+
+        const suodatettu = kaikkiData.filter(item => {
+            if (item.year && item.year >= 2010 && item.year <= 2026) loydetytVuodet.add(item.year);
+            
+            // 2. VUOSISUODATUS: Jos vuosia on valittu, näytetään vain ne kuvat. 
+            // Jos yhtään vuotta ei ole valittu, näytetään kaikki.
+            if (valitutVuodetKartalla.size > 0 && (!item.year || !valitutVuodetKartalla.has(item.year))) {
+                return false;
+            }
+
+            const hasLoc = !!(item.lat && item.lng);
+            if (locFilter === 'has_loc' && !hasLoc) return false;
+            if (locFilter === 'no_loc' && hasLoc) return false;
+
+            const ext = (item.path || "").split('.').pop().toLowerCase();
+            const isVideo = item.type === 'video';
+            const isJpg = !isVideo && (ext === 'jpg' || ext === 'jpeg');
+            const isOther = !isVideo && !isJpg;
+
+            if (typeFilter === 'jpg' && !isJpg) return false;
+            if (typeFilter === 'video' && !isVideo) return false;
+            if (typeFilter === 'other' && !isOther) return false;
+
+            return true;
+        });
+
+        // 3. Lisätään valikkoon vain puuttuvat vuodet (ei poisteta vanhoja, jotta raksit eivät katoa)
+        Array.from(loydetytVuodet).sort().forEach(vuosi => {
+            if (!ilmakuvaTasot[vuosi]) {
+                ilmakuvaTasot[vuosi] = L.tileLayer.wms(mmlOrtoWmsUrl, { layers: 'ortokuva', TIME: vuosi, format: 'image/jpeg', transparent: false, version: '1.3.0', attribution: 'Maanmittauslaitos', zIndex: 10 });
+                layerControl.addOverlay(ilmakuvaTasot[vuosi], `📅 Vuosi ${vuosi}`);
+            }
+        });
+
+        rakennaLista(suodatettu, 'all-file-list', 'right-count');
+
+        suodatettu.forEach(item => {
+            // POMMINKESTÄVÄ KORJAUS 3: Käsitellään kohteet suojatussa laatikossa
+            try {
+                if (item.lat && item.lng) {
+                    let onValittu = valitutKuvat.has(item.path);
+                    let markerClass = onValittu ? 'custom-div-icon marker-selected' : 'custom-div-icon';
+
+                    // Videot pidetään videokamerana, kuvat muutetaan oranssiksi palloksi
+                    let markerHtml = item.type === 'video' 
+                        ? `<div class="marker-bg" style="font-size:24px; width:30px; height:30px; display:flex; align-items:center; justify-content:center;">🎥</div>`
+                        : `<div class="marker-bg" style="width:20px; height:20px; background-color:#ff8800; border-radius:50%; border:2px solid #fff; box-shadow:0 0 5px rgba(0,0,0,0.5);"></div>`;
+                    
+                    let markerSize = item.type === 'video' ? [30, 30] : [20, 20];
+                    let markerAnchor = item.type === 'video' ? [15, 15] : [10, 10];
+
+                    let marker = L.marker([item.lat, item.lng], {
+                        icon: L.divIcon({
+                            className: markerClass, 
+                            html: markerHtml, 
+                            iconSize: markerSize, iconAnchor: markerAnchor
+                        })
+                    });
+                    
+                    kaikkiMarkeritObjektit[item.path] = marker;
+
+                    marker.on('click', () => {
+                        const valintatilaPäällä = document.getElementById('valintatila-cb')?.checked;
+                        
+                        if (valintatilaPäällä) {
+                            if (valitutKuvat.has(item.path)) {
+                                valitutKuvat.delete(item.path);
+                                L.DomUtil.removeClass(marker.getElement(), 'marker-selected');
+                            } else {
+                                valitutKuvat.add(item.path);
+                                L.DomUtil.addClass(marker.getElement(), 'marker-selected');
+                            }
+                            paivitaValintaUI();
+                        } else {
+                            map.setView([item.lat, item.lng], 16);
+                            avaaMedia(item.path, item.type);
+                        }
+                    });
+
+                    marker.on('mouseover', () => {
+                        if (aktiivinenSiirtoTila) return; 
+                        clearTimeout(pipViive); 
+                        
+                        if (item.type !== 'video') {
+                            const onkoMassaValintaa = valitutKuvat.size > 0;
+                            const onkoTamaValittu = valitutKuvat.has(item.path);
+                            
+                            let nappulat = `
+                                <button onmousedown="aloitaYksittainenSiirto('${escapeHtmlAttr(item.path)}', event)" class="adv-btn btn-orange" style="padding:6px; margin:0; width:100%;">
+                                    📍 Siirrä kuvapiste
+                                </button>
+                            `;
+                            
+                            if (onkoMassaValintaa && !onkoTamaValittu) {
+                                nappulat += `
+                                    <button onmousedown="yhdistaValitutTahan(${item.lat}, ${item.lng}, event)" class="adv-btn btn-blue" style="padding:6px; margin-top:5px; width:100%; background:#2980b9;">
+                                        🔗 Yhdistä valitut tähän
+                                    </button>
+                                `;
+                            }
+
+                            pipTooltip.setContent(`
+                                <div style="text-align:center; min-width:160px;">
+                                    <img src="/media/${escapeHtmlAttr(item.path)}" onload="pipTooltip.update()" style="width:100%; min-height:110px; display:block; border-radius:2px; margin-bottom: 5px; background:#000;">
+                                    ${nappulat}
+                                </div>
+                            `);
+                            pipTooltip.setLatLng(marker.getLatLng());
+                            map.openTooltip(pipTooltip);
+                        }
+
+                        // POMMINKESTÄVÄ KORJAUS 4: querySelectorAll korvattu turvallisemmalla listan selaamisella
+                        document.querySelectorAll('.list-item').forEach(el => {
+                            if(el.getAttribute('data-path') === item.path) {
+                                el.classList.add('is-hovered');
+                                el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+                            }
+                        });
+                    });
+
+                    marker.on('mouseout', () => {
+                        pipViive = setTimeout(() => {
+                            if (map.hasLayer(pipTooltip)) map.closeTooltip(pipTooltip);
+                        }, 300);
+
+                        document.querySelectorAll('.list-item').forEach(el => {
+                            if(el.getAttribute('data-path') === item.path) {
+                                el.classList.remove('is-hovered');
+                            }
+                        });
+                    });
+                    
+                    markerClusterGroup.addLayer(marker);
+                }
+
+                if (item.type === 'video' && item.route) {
+                    let latlngs = item.route.map(p => [p.lat, p.lng]);
+                    let viiva = L.polyline(latlngs, {color: 'red', weight: 4, opacity: 0.7}).addTo(map);
+                    
+                    viiva.on('mouseover', function(e) {
+                        this.setStyle({ weight: 7, color: '#ffaa00', opacity: 1 });
+                        
+                        document.querySelectorAll('.list-item').forEach(el => {
+                            if(el.getAttribute('data-path') === item.path) {
+                                el.classList.add('is-hovered');
+                                el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+                            }
+                        });
+                    });
+                    
+                    viiva.on('mouseout', function(e) {
+                        this.setStyle({ weight: 4, color: 'red', opacity: 0.7 });
+                        
+                        document.querySelectorAll('.list-item').forEach(el => {
+                            if(el.getAttribute('data-path') === item.path) {
+                                el.classList.remove('is-hovered');
+                            }
+                        });
+                    });
+
+                    viiva.on('click', function() {
+                        avaaMedia(item.path, item.type);
+                    });
+
+                    reittiViivat.push(viiva);
+                }
+            } catch(e) {
+                console.error("Virhe ladattaessa merkkiä kartalle:", item.path, e);
+            }
+        });
+    }
+
+    function rakennaLista(lista, containerId, countId) {
+        if(document.getElementById(countId)) document.getElementById(countId).innerText = lista.length;
+        const c = document.getElementById(containerId);
+        if(!c) return;
+        c.innerHTML = '';
+        lista.forEach(item => {
+            let div = document.createElement('div');
+            div.className = 'list-item';
+            div.setAttribute('data-path', item.path); // Turvallisempi asettaa ilman muokkauksia
+            
+            if (valitutKuvat.has(item.path)) div.classList.add('is-selected');
+
+            div.innerHTML = `<span style="font-size:16px;">${item.type === 'video' ? '🎥' : '📷'}</span> <span style="font-size:12px; word-break:break-all;">${escapeHtmlAttr(item.name)}</span>`;
+            div.onclick = () => {
+                if (item.lat && item.lng) map.setView([item.lat, item.lng], 16);
+                avaaMedia(item.path, item.type);
+            };
+            c.appendChild(div);
+        });
+    }
+
+    // ==========================================
+    // LIGHTBOX JA MEDIA
+    // ==========================================
+
+    function avaaMedia(path, type) {
+        const valintatilaPäällä = document.getElementById('valintatila-cb')?.checked;
+        if (valintatilaPäällä) {
+            if (valitutKuvat.has(path)) valitutKuvat.delete(path);
+            else valitutKuvat.add(path);
+            paivitaValintaUI();
+            paivitaKartta(); 
+            return;
+        }
+
+        const item = kaikkiData.find(d => d.path === path);
+        if (!item) return;
+
+        if (type === 'video') {
+            soitaVideo(item);
+        } else {
+            if (item.lat && item.lng) {
+                nykyinenKuvaLista = kaikkiData.filter(d => d.type !== 'video' && d.lat === item.lat && d.lng === item.lng);
+            } else {
+                nykyinenKuvaLista = [item];
+            }
+            if (nykyinenKuvaLista.length === 0) nykyinenKuvaLista = [item];
+            nykyinenKuvaIndeksi = nykyinenKuvaLista.findIndex(d => d.path === path);
+            naytaLightboxKuva();
+        }
+    }
+
+    function naytaLightboxKuva() {
+        if (nykyinenKuvaLista.length === 0) return;
+        const item = nykyinenKuvaLista[nykyinenKuvaIndeksi];
+        document.getElementById('lightbox-img').src = '/media/' + escapeHtmlAttr(item.path);
+        document.getElementById('lightbox').style.display = 'flex';
+        
+        const showNav = nykyinenKuvaLista.length > 1;
+        document.getElementById('lb-prev').style.display = showNav ? 'block' : 'none';
+        document.getElementById('lb-next').style.display = showNav ? 'block' : 'none';
+        
+        const counter = document.getElementById('lb-counter');
+        if (showNav) {
+            counter.style.display = 'block';
+            counter.innerText = `Kuva ${nykyinenKuvaIndeksi + 1} / ${nykyinenKuvaLista.length}`;
+        } else {
+            counter.style.display = 'none';
+        }
+    }
+
+    function vaihdaKuva(suunta, event) {
+        if (event) event.stopPropagation(); 
+        if (nykyinenKuvaLista.length <= 1) return;
+        nykyinenKuvaIndeksi += suunta;
+        if (nykyinenKuvaIndeksi < 0) nykyinenKuvaIndeksi = nykyinenKuvaLista.length - 1;
+        if (nykyinenKuvaIndeksi >= nykyinenKuvaLista.length) nykyinenKuvaIndeksi = 0;
+        naytaLightboxKuva();
+    }
+
+    function suljeLightbox() { document.getElementById('lightbox').style.display = 'none'; nykyinenKuvaLista = []; }
+    document.addEventListener('keydown', (e) => {
+        if (document.getElementById('lightbox').style.display === 'flex') {
+            if (e.key === 'ArrowLeft') vaihdaKuva(-1, e);
+            if (e.key === 'ArrowRight') vaihdaKuva(1, e);
+            if (e.key === 'Escape') suljeLightbox();
+        }
+    });
+
+    let droneMarker = L.marker([0, 0], { icon: L.divIcon({ html: '<div class="drone-wrapper"><div class="drone-arrow" id="drone-pointer"></div></div>', className: '', iconSize: [40, 40], iconAnchor: [20, 20] }) });
+    let activeItem = null, isPlaying = false, animationFrameId, viimeAngle = 0;
+    const v = document.getElementById('active-video');
+    if(v) {
+        v.onplay = () => { isPlaying = true; paivitaDrone(); };
+        v.onpause = () => { isPlaying = false; cancelAnimationFrame(animationFrameId); };
+        v.onended = () => { isPlaying = false; cancelAnimationFrame(animationFrameId); };
+    }
+
+    function paivitaDrone() {
+        if (!activeItem || !activeItem.route || !isPlaying) return;
+        const progress = v.currentTime / v.duration;
+        const exactIdx = progress * (activeItem.route.length - 1);
+        const idx1 = Math.floor(exactIdx), idx2 = Math.min(idx1 + 1, activeItem.route.length - 1), factor = exactIdx - idx1;
+        const p1 = activeItem.route[idx1], p2 = activeItem.route[idx2];
+        if (p1 && p2) {
+            const lat = p1.lat + (p2.lat - p1.lat) * factor, lng = p1.lng + (p2.lng - p1.lng) * factor;
+            droneMarker.setLatLng([lat, lng]);
+            if (Math.hypot(p2.lat - p1.lat, p2.lng - p1.lng) > 0.000001 && idx1 !== idx2) {
+                 viimeAngle = Math.atan2(Math.cos(Math.PI / 180 * p1.lat) * (p2.lng - p1.lng), p2.lat - p1.lat) * 180 / Math.PI;
+            }
+            if (document.getElementById('drone-pointer')) document.getElementById('drone-pointer').style.transform = `rotate(${viimeAngle}deg)`;
+        }
+        if (isPlaying) animationFrameId = requestAnimationFrame(paivitaDrone);
+    }
+
+    function soitaVideo(item) {
+        if (!item || !item.route) return;
+        activeItem = item;
+        v.src = '/media/' + escapeHtmlAttr(item.path);
+        document.getElementById('video-player-container').style.display = 'block';
+        document.getElementById('video-title').innerText = item.name;
+        droneMarker.setLatLng([item.route[0].lat, item.route[0].lng]).addTo(map);
+        v.play();
+    }
+
+    function suljeVideo() { v.pause(); activeItem = null; document.getElementById('video-player-container').style.display = 'none'; map.removeLayer(droneMarker); }
+    function paivitaNakyvat() { rakennaLista(kaikkiData.filter(d => d.lat && map.getBounds().contains([d.lat, d.lng])), 'local-file-list', 'left-count'); }
+    
+    function tallennaAvain() { fetch('/api/config/key', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key: document.getElementById('api-key-input').value}) }).then(() => alert("Avain tallennettu! Päivitä sivu (F5) ottaaksesi MML-tasot käyttöön.")); }
+    async function valitseKansio() { const res = await fetch('/api/config/pick_folder'); const data = await res.json(); if (data.path) { const saveRes = await fetch('/api/config/add_folder', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({path: data.path}) }); if (saveRes.ok) { alert("Kansio lisätty: " + data.path); lataaData(); } } }
+
+    map.on('moveend', paivitaNakyvat);
+    lataaData();
+	
+	// TÄMÄ FUNKTIO NÄYTTÄÄ KRYPTO-OSOITTEET
+// AVAAMINEN
+function naytaKrypto() {
+    document.getElementById('krypto-modal').style.display = 'flex';
+}
+
+// SULKEMINEN
+function suljeKrypto() {
+    document.getElementById('krypto-modal').style.display = 'none';
+}
+</script>
+<div id="krypto-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.9); z-index:10000; align-items:center; justify-content:center;">
+    <div style="background:#222; padding:30px; border-radius:15px; border:2px solid var(--accent); max-width:90%; max-height:90%; overflow-y:auto; text-align:center; position:relative;">
+        <button onclick="suljeKrypto()" style="position:absolute; top:10px; right:10px; background:red; color:white; border:none; padding:5px 10px; cursor:pointer; border-radius:5px;">X</button>
+        <h2 style="margin-top:0;">💎 Kryptolahjoitus</h2>
+        <p style="font-size:13px; color:#aaa;">Skannaa koodi puhelimella tai kopioi osoite.</p>
+        
+        <div style="display:flex; flex-wrap:wrap; gap:20px; justify-content:center; margin-top:20px;">
+            <div style="background:#333; padding:15px; border-radius:10px; width:200px;">
+                <b style="color:#f39c12;">Bitcoin (BTC)</b><br>
+                <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=bc1qfvcrutctcr9hzj6yar0hk3kh6nltrr59h7m99t" style="margin:10px 0; border:5px solid white; border-radius:5px;">
+                <div style="font-size:10px; word-break:break-all; background:#000; padding:5px; border-radius:3px;">bc1qfvcrutctcr9hzj6yar0hk3kh6nltrr59h7m99t</div>
+            </div>
+
+            <div style="background:#333; padding:15px; border-radius:10px; width:200px;">
+                <b style="color:#3498db;">Ethereum (ETH)</b><br>
+                <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=0x4ce6841fBE29991EDB678cfcB3ECfB7E257c0F0F" style="margin:10px 0; border:5px solid white; border-radius:5px;">
+                <div style="font-size:10px; word-break:break-all; background:#000; padding:5px; border-radius:3px;">0x4ce6841fBE29991EDB678cfcB3ECfB7E257c0F0F</div>
+            </div>
+
+            <div style="background:#333; padding:15px; border-radius:10px; width:200px;">
+                <b style="color:#14f195;">Solana (SOL)</b><br>
+                <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=yDSmnpKpsf5ri3S1FrygcgHwFFGxfQRk2xT5v15zqND" style="margin:10px 0; border:5px solid white; border-radius:5px;">
+                <div style="font-size:10px; word-break:break-all; background:#000; padding:5px; border-radius:3px;">yDSmnpKpsf5ri3S1FrygcgHwFFGxfQRk2xT5v15zqND</div>
+            </div>
+        </div>
+        <button class="adv-btn btn-green" onclick="suljeKrypto()" style="margin-top:30px; width:auto; padding:10px 40px;">Selvä!</button>
+    </div>
+</div>
+</body>
+</html>
