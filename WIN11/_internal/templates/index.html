@@ -611,7 +611,18 @@ function rakennaLista(lista, containerId, countId) {
             div.onmouseenter = () => {
                 const marker = kaikkiMarkeritObjektit[item.path];
                 if (marker) {
-                    marker.fire('mouseover'); // Laukaisee karttamerkin PiP-ikkunan
+                    // 1. Kysytään yleiseltä klusteriryhmältä, onko tämä merkki piilossa
+                    const parent = markerClusterGroup.getVisibleParent(marker);
+                    
+                    // Jos merkki on piilossa klusteripallon sisällä, räjäytetään pallo auki
+                    if (parent && parent !== marker && typeof parent.spiderfy === 'function') {
+                        parent.spiderfy();
+                    }
+
+                    // 2. Annetaan animaatiolle 50ms aikaa tapahtua, ennen kuin laukaistaan PiP
+                    setTimeout(() => {
+                        marker.fire('mouseover'); // Laukaisee karttamerkin PiP-ikkunan
+                    }, 50);
                 }
             };
             
@@ -747,51 +758,58 @@ function avaaMedia(path, type, sourceList = null) {
     }
 
     function suljeVideo() { v.pause(); activeItem = null; document.getElementById('video-player-container').style.display = 'none'; map.removeLayer(droneMarker); }
-    function paivitaNakyvat() {
-    // 1. Haetaan nykyiset suodatinarvot
-    const locFilter = document.querySelector('input[name="locFilter"]:checked')?.value || 'all';
-    const typeFilter = document.querySelector('input[name="typeFilter"]:checked')?.value || 'all';
-    
-    // Selvitetään aktiiviset vuodet (jos käytössä)
-    let valitutVuodetKartalla = new Set();
-    for (let y = 2010; y <= 2026; y++) {
-        if (ilmakuvaTasot[y] && map.hasLayer(ilmakuvaTasot[y])) {
-            valitutVuodetKartalla.add(y);
-        }
-    }
+function paivitaNakyvat() {
+          // 1. Haetaan nykyiset suodatinarvot
+          const locFilter = document.querySelector('input[name="locFilter"]:checked')?.value || 'all';
+          const typeFilter = document.querySelector('input[name="typeFilter"]:checked')?.value || 'all';
+             
+          // Selvitetään aktiiviset vuodet (jos käytössä)
+          let valitutVuodetKartalla = new Set();
+          for (let y = 2010; y <= 2026; y++) {
+                    if (ilmakuvaTasot[y] && map.hasLayer(ilmakuvaTasot[y])) {
+                              valitutVuodetKartalla.add(y);
+                    }
+          }
 
-    // 2. Suodatetaan data samoilla säännöillä kuin karttamerkit
-    const nakyvatSuodatetut = kaikkiData.filter(item => {
-        // A. Sijaintitarkistus (onko kartan rajojen sisällä)
-        if (!item.lat || !item.lng || !map.getBounds().contains([item.lat, item.lng])) {
-            return false;
-        }
+    const bounds = map.getBounds();
 
-        // B. Vuosisuodatus
-        if (valitutVuodetKartalla.size > 0 && (!item.year || !valitutVuodetKartalla.has(item.year))) {
-            return false;
-        }
+          // 2. Suodatetaan data samoilla säännöillä kuin karttamerkit
+          const nakyvatSuodatetut = kaikkiData.filter(item => {
+                    // A. Sijaintitarkistus (Ymmärtää nyt myös pelkän reitin)
+                    let inBounds = false;
+                    if (item.lat && item.lng && bounds.contains([item.lat, item.lng])) {
+                              inBounds = true;
+                    } else if (item.type === 'video' && item.route && item.route.length > 0) {
+            // Jos videolla on reitti, katsotaan osuuko edes yksi reitin piste kartalle
+                              inBounds = item.route.some(p => bounds.contains([p.lat, p.lng]));
+                    }
+                    if (!inBounds) return false;
 
-        // C. Sijaintisuodatus (radio-napit)
-        const hasLoc = !!(item.lat && item.lng);
-        if (locFilter === 'has_loc' && !hasLoc) return false;
-        if (locFilter === 'no_loc' && hasLoc) return false;
+                    // B. Vuosisuodatus
+                    if (valitutVuodetKartalla.size > 0 && (!item.year || !valitutVuodetKartalla.has(item.year))) {
+                              return false;
+                    }
 
-        // D. Tyyppisuodatus (JPG / Video / Muut)
-        const ext = (item.path || "").split('.').pop().toLowerCase();
-        const isVideo = item.type === 'video';
-        const isJpg = !isVideo && (ext === 'jpg' || ext === 'jpeg');
-        const isOther = !isVideo && !isJpg;
+                    // C. Sijaintisuodatus (Hyväksyy nyt myös pelkän reitin sijainniksi)
+                    const hasLoc = !!(item.lat && item.lng) || !!(item.type === 'video' && item.route && item.route.length > 0);
+                    if (locFilter === 'has_loc' && !hasLoc) return false;
+                    if (locFilter === 'no_loc' && hasLoc) return false;
 
-        if (typeFilter === 'jpg' && !isJpg) return false;
-        if (typeFilter === 'video' && !isVideo) return false;
-        if (typeFilter === 'other' && !isOther) return false;
+                    // D. Tyyppisuodatus (JPG / Video / Muut)
+                    const ext = (item.path || "").split('.').pop().toLowerCase();
+                    const isVideo = item.type === 'video';
+                    const isJpg = !isVideo && (ext === 'jpg' || ext === 'jpeg');
+                    const isOther = !isVideo && !isJpg;
 
-        return true;
-    });
+                    if (typeFilter === 'jpg' && !isJpg) return false;
+                    if (typeFilter === 'video' && !isVideo) return false;
+                    if (typeFilter === 'other' && !isOther) return false;
 
-    // 3. Rakennetaan vasen lista suodatetulla datalla
-    rakennaLista(nakyvatSuodatetut, 'local-file-list', 'left-count');
+                    return true;
+          });
+
+          // 3. Rakennetaan vasen lista suodatetulla datalla
+          rakennaLista(nakyvatSuodatetut, 'local-file-list', 'left-count');
 }
     function tallennaAvain() { fetch('/api/config/key', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key: document.getElementById('api-key-input').value}) }).then(() => alert("Avain tallennettu! Päivitä sivu (F5) ottaaksesi MML-tasot käyttöön.")); }
     async function valitseKansio() { const res = await fetch('/api/config/pick_folder'); const data = await res.json(); if (data.path) { const saveRes = await fetch('/api/config/add_folder', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({path: data.path}) }); if (saveRes.ok) { alert("Kansio lisätty: " + data.path); lataaData(); } } }

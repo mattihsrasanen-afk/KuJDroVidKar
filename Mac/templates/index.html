@@ -625,7 +625,18 @@ function rakennaLista(lista, containerId, countId) {
             div.onmouseenter = () => {
                 const marker = kaikkiMarkeritObjektit[item.path];
                 if (marker) {
-                    marker.fire('mouseover'); // Laukaisee karttamerkin PiP-ikkunan
+                    // 1. Kysytään yleiseltä klusteriryhmältä, onko tämä merkki piilossa
+                    const parent = markerClusterGroup.getVisibleParent(marker);
+                    
+                    // Jos merkki on piilossa klusteripallon sisällä, räjäytetään pallo auki
+                    if (parent && parent !== marker && typeof parent.spiderfy === 'function') {
+                        parent.spiderfy();
+                    }
+
+                    // 2. Annetaan animaatiolle 50ms aikaa tapahtua, ennen kuin laukaistaan PiP
+                    setTimeout(() => {
+                        marker.fire('mouseover'); // Laukaisee karttamerkin PiP-ikkunan
+                    }, 50);
                 }
             };
             
