@@ -584,6 +584,7 @@
                 console.error("Virhe ladattaessa merkkiä kartalle:", item.path, e);
             }
         });
+		paivitaNakyvat();
     }
 
 function rakennaLista(lista, containerId, countId) {
@@ -746,8 +747,52 @@ function avaaMedia(path, type, sourceList = null) {
     }
 
     function suljeVideo() { v.pause(); activeItem = null; document.getElementById('video-player-container').style.display = 'none'; map.removeLayer(droneMarker); }
-    function paivitaNakyvat() { rakennaLista(kaikkiData.filter(d => d.lat && map.getBounds().contains([d.lat, d.lng])), 'local-file-list', 'left-count'); }
+    function paivitaNakyvat() {
+    // 1. Haetaan nykyiset suodatinarvot
+    const locFilter = document.querySelector('input[name="locFilter"]:checked')?.value || 'all';
+    const typeFilter = document.querySelector('input[name="typeFilter"]:checked')?.value || 'all';
     
+    // Selvitetään aktiiviset vuodet (jos käytössä)
+    let valitutVuodetKartalla = new Set();
+    for (let y = 2010; y <= 2026; y++) {
+        if (ilmakuvaTasot[y] && map.hasLayer(ilmakuvaTasot[y])) {
+            valitutVuodetKartalla.add(y);
+        }
+    }
+
+    // 2. Suodatetaan data samoilla säännöillä kuin karttamerkit
+    const nakyvatSuodatetut = kaikkiData.filter(item => {
+        // A. Sijaintitarkistus (onko kartan rajojen sisällä)
+        if (!item.lat || !item.lng || !map.getBounds().contains([item.lat, item.lng])) {
+            return false;
+        }
+
+        // B. Vuosisuodatus
+        if (valitutVuodetKartalla.size > 0 && (!item.year || !valitutVuodetKartalla.has(item.year))) {
+            return false;
+        }
+
+        // C. Sijaintisuodatus (radio-napit)
+        const hasLoc = !!(item.lat && item.lng);
+        if (locFilter === 'has_loc' && !hasLoc) return false;
+        if (locFilter === 'no_loc' && hasLoc) return false;
+
+        // D. Tyyppisuodatus (JPG / Video / Muut)
+        const ext = (item.path || "").split('.').pop().toLowerCase();
+        const isVideo = item.type === 'video';
+        const isJpg = !isVideo && (ext === 'jpg' || ext === 'jpeg');
+        const isOther = !isVideo && !isJpg;
+
+        if (typeFilter === 'jpg' && !isJpg) return false;
+        if (typeFilter === 'video' && !isVideo) return false;
+        if (typeFilter === 'other' && !isOther) return false;
+
+        return true;
+    });
+
+    // 3. Rakennetaan vasen lista suodatetulla datalla
+    rakennaLista(nakyvatSuodatetut, 'local-file-list', 'left-count');
+}
     function tallennaAvain() { fetch('/api/config/key', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key: document.getElementById('api-key-input').value}) }).then(() => alert("Avain tallennettu! Päivitä sivu (F5) ottaaksesi MML-tasot käyttöön.")); }
     async function valitseKansio() { const res = await fetch('/api/config/pick_folder'); const data = await res.json(); if (data.path) { const saveRes = await fetch('/api/config/add_folder', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({path: data.path}) }); if (saveRes.ok) { alert("Kansio lisätty: " + data.path); lataaData(); } } }
 

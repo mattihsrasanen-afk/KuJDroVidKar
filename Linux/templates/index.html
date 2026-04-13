@@ -240,10 +240,15 @@
     }
 
     function escapeHtmlAttr(str) {
-        if (!str) return "";
-        return str.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-    }
+    if (!str) return "";
+    return str.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
 
+// UUSI FUNKTIO LISÄTTY TÄHÄN:
+function escapeJsString(str) {
+    if (!str) return "";
+    return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
     // ==========================================
     // VALINTATILAN JA SIIRTOJEN LOGIIKKA
     // ==========================================
@@ -371,9 +376,10 @@
     }
 
     function peruutaSiirto() {
-        siivotaanSiirtoUI();
-        paivitaKartta(); 
-    }
+    siivotaanSiirtoUI();
+    // paivitaKartta(); <-- Ota tämä pois! 
+    // Karttaa ei tarvitse rakentaa nollasta pelkän siirron peruutuksen takia.
+}
 
     function siivotaanSiirtoUI() {
         if (aktiivinenSiirtoTila === 'multi' && siirtoMerkki) {
@@ -497,21 +503,22 @@
                         }
                     });
 
-                    marker.on('mouseover', () => {
+                    marker.on('mouseover', (e) => {
                         if (aktiivinenSiirtoTila) return; 
-                        clearTimeout(pipViive); 
+                        clearTimeout(pipViive);
                         
                         if (item.type !== 'video') {
                             const onkoMassaValintaa = valitutKuvat.size > 0;
                             const onkoTamaValittu = valitutKuvat.has(item.path);
                             
+                            // KORJAUS: Käytetään escapeJsString() estämään heittomerkkien rikkoutuminen JS:ssä
                             let nappulat = `
-                                <button onmousedown="aloitaYksittainenSiirto('${escapeHtmlAttr(item.path)}', event)" class="adv-btn btn-orange" style="padding:6px; margin:0; width:100%;">
+                                <button onmousedown="aloitaYksittainenSiirto('${escapeJsString(item.path)}', event)" class="adv-btn btn-orange" style="padding:6px; margin:0; width:100%;">
                                     📍 Siirrä kuvapiste
                                 </button>
                             `;
                             
-                         if (onkoMassaValintaa && !onkoTamaValittu) {
+                            if (onkoMassaValintaa && !onkoTamaValittu) {
                                 nappulat += `
                                     <button onmousedown="yhdistaValitutTahan(${item.lat}, ${item.lng}, event)" class="adv-btn btn-blue" style="padding:6px; margin-top:5px; width:100%; background:#2980b9;">
                                         🔗 Yhdistä valitut tähän
@@ -519,7 +526,7 @@
                                 `;
                             }
 
-                            // KORJAUS: Käytetään uutta css-luokkaa ja poistetaan raskas onload-päivitys, mikä poistaa tökkimisen.
+                            // Kuvan lähteessä (src) käytetään yhä escapeHtmlAttr()
                             pipTooltip.setContent(`
                                 <div style="text-align:center; min-width:160px;">
                                     <div class="pip-img-container">
@@ -532,15 +539,6 @@
                             map.openTooltip(pipTooltip);
                         }
 
-                        // POMMINKESTÄVÄ KORJAUS 4: querySelectorAll korvattu turvallisemmalla listan selaamisella   
-                        document.querySelectorAll('.list-item').forEach(el => {
-                            if(el.getAttribute('data-path') === item.path) {
-                                el.classList.add('is-hovered');
-                                el.scrollIntoView({ behavior: "smooth", block: "nearest" });
-                            }
-                        });
-                    });
-
                     marker.on('mouseout', () => {
                         pipViive = setTimeout(() => {
                             if (map.hasLayer(pipTooltip)) map.closeTooltip(pipTooltip);
@@ -548,7 +546,13 @@
 
                         document.querySelectorAll('.list-item').forEach(el => {
                             if(el.getAttribute('data-path') === item.path) {
-                                el.classList.remove('is-hovered');
+                                el.classList.add('is-hovered');
+                                
+                                // TÄMÄ ON SE KORJAUS:
+                                // Rullataan listaa vain, jos tapahtuma tuli oikealta hiireltä kartalla!
+                                if (e && e.originalEvent) {
+                                    el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+                                }
                             }
                         });
                     });
@@ -566,7 +570,10 @@
                         document.querySelectorAll('.list-item').forEach(el => {
                             if(el.getAttribute('data-path') === item.path) {
                                 el.classList.add('is-hovered');
-                                el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+                                // KORJAUS MYÖS VIDEOILLE: Rullataan vain kun oikea hiiri on kartalla
+                                if (e && e.originalEvent) {
+                                    el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+                                }
                             }
                         });
                     });
@@ -591,6 +598,7 @@
                 console.error("Virhe ladattaessa merkkiä kartalle:", item.path, e);
             }
         });
+        paivitaNakyvat();
     }
 
 function rakennaLista(lista, containerId, countId) {
@@ -754,10 +762,73 @@ function avaaMedia(path, type, sourceList = null) {
     }
 
     function suljeVideo() { v.pause(); activeItem = null; document.getElementById('video-player-container').style.display = 'none'; map.removeLayer(droneMarker); }
-    function paivitaNakyvat() { rakennaLista(kaikkiData.filter(d => d.lat && map.getBounds().contains([d.lat, d.lng])), 'local-file-list', 'left-count'); }
+function paivitaNakyvat() {
+    // 1. Haetaan nykyiset suodatinarvot
+    const locFilter = document.querySelector('input[name="locFilter"]:checked')?.value || 'all';
+    const typeFilter = document.querySelector('input[name="typeFilter"]:checked')?.value || 'all';
+    
+    // Selvitetään aktiiviset vuodet (jos käytössä)
+    let valitutVuodetKartalla = new Set();
+    for (let y = 2010; y <= 2026; y++) {
+        if (ilmakuvaTasot[y] && map.hasLayer(ilmakuvaTasot[y])) {
+            valitutVuodetKartalla.add(y);
+        }
+    }
+
+    // 2. Suodatetaan data samoilla säännöillä kuin karttamerkit
+    const nakyvatSuodatetut = kaikkiData.filter(item => {
+        // A. Sijaintitarkistus (onko kartan rajojen sisällä)
+        if (!item.lat || !item.lng || !map.getBounds().contains([item.lat, item.lng])) {
+            return false;
+        }
+
+        // B. Vuosisuodatus
+        if (valitutVuodetKartalla.size > 0 && (!item.year || !valitutVuodetKartalla.has(item.year))) {
+            return false;
+        }
+
+        // C. Sijaintisuodatus (radio-napit)
+        const hasLoc = !!(item.lat && item.lng);
+        if (locFilter === 'has_loc' && !hasLoc) return false;
+        if (locFilter === 'no_loc' && hasLoc) return false;
+
+        // D. Tyyppisuodatus (JPG / Video / Muut)
+        const ext = (item.path || "").split('.').pop().toLowerCase();
+        const isVideo = item.type === 'video';
+        const isJpg = !isVideo && (ext === 'jpg' || ext === 'jpeg');
+        const isOther = !isVideo && !isJpg;
+
+        if (typeFilter === 'jpg' && !isJpg) return false;
+        if (typeFilter === 'video' && !isVideo) return false;
+        if (typeFilter === 'other' && !isOther) return false;
+
+        return true;
+    });
+
+    // 3. Rakennetaan vasen lista suodatetulla datalla
+    rakennaLista(nakyvatSuodatetut, 'local-file-list', 'left-count');
+}
     
     function tallennaAvain() { fetch('/api/config/key', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key: document.getElementById('api-key-input').value}) }).then(() => alert("Avain tallennettu! Päivitä sivu (F5) ottaaksesi MML-tasot käyttöön.")); }
-    async function valitseKansio() { const res = await fetch('/api/config/pick_folder'); const data = await res.json(); if (data.path) { const saveRes = await fetch('/api/config/add_folder', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({path: data.path}) }); if (saveRes.ok) { alert("Kansio lisätty: " + data.path); lataaData(); } } }
+    async function valitseKansio() { 
+    try {
+        const res = await fetch('/api/config/pick_folder'); 
+        const data = await res.json(); 
+        if (data.path) { 
+            const saveRes = await fetch('/api/config/add_folder', { 
+                method: 'POST', 
+                headers: {'Content-Type': 'application/json'}, 
+                body: JSON.stringify({path: data.path}) 
+            }); 
+            if (saveRes.ok) { 
+                alert("Kansio lisätty: " + data.path); 
+                lataaData(); 
+            } 
+        } 
+    } catch (e) {
+        console.error("Virhe kansion lisäyksessä:", e);
+    }
+}
 
     map.on('moveend', paivitaNakyvat);
     lataaData();
