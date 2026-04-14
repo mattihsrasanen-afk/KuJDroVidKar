@@ -23,6 +23,14 @@ Key Features:
 
     High-Quality Maps: Integrates with official Finnish topographic maps and datasets.
 
+### ⚠️ Huomautus Windows-käyttäjille (SmartScreen)
+
+Koska kyseessä on itsenäisen kehittäjän harrasteprojekti, asennustiedostoa ei ole allekirjoitettu maksullisella yritysvarmenteella. Tämän vuoksi Windowsin Defender SmartScreen saattaa näyttää asennuksen yhteydessä sinisen varoitusikkunan ("Windows suojasi tietokonettasi").
+
+**Voit asentaa ohjelman turvallisesti ohittamalla varoituksen näin:**
+1. Klikkaa varoitusikkunassa olevaa **Lisätietoja**-linkkiä.
+2. Tämän jälkeen ikkunan alareunaan ilmestyy uusi painike. Klikkaa **Suorita silti**.
+
 ## Lisenssi (License)
 
 Tämä ohjelma on vapaa ohjelmisto: sitä saa jakaa edelleen ja/tai muokata Free Software Foundationin julkaiseman GNU General Public License -lisenssin (GPL) ehtojen mukaisesti, joko lisenssin version 3 tai (valintasi mukaan) minkä tahansa myöhemmän version mukaisesti.
@@ -39,7 +47,7 @@ Ohjelma hyödyntää Maanmittauslaitoksen avoimia aineistoja. Käyttämällä t�
     Kartta-aineistot: Maanmittauslaitos
 
     Lisenssi: Creative Commons Nimeä 4.0 Kansainvälinen
-    
+
 ## 💰 Tuki (Support)
 
 Jos haluat tukea ohjelman kehitystä, voit tehdä lahjoituksen täällä: https://paypal.me/MattiHSRasanenAFK
