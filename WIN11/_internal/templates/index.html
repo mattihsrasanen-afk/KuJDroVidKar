@@ -45,6 +45,16 @@
         
         #video-player-container { position: absolute; top: 20px; left: 20px; background: rgba(0,0,0,0.9); border: 2px solid var(--accent); border-radius: 8px; padding: 10px; z-index: 1000; display: none; width: 320px; box-shadow: 0 10px 30px rgba(0,0,0,0.8); }
         #video-player-container video { width: 100%; border-radius: 4px; }
+
+        /* KORJATTU: KOKO NÄYTÖN VIDEO JA PIKKUKARTTA */
+        #video-player-container.fullscreen-mode { position: fixed; top: 0 !important; left: 0 !important; width: 100vw; height: 100vh; z-index: 10000; border-radius: 0; border: none; padding: 10px; box-sizing: border-box; background: #000; display: flex; flex-direction: column; overflow: hidden; }
+        /* KORJAUS 1: min-height: 0 estää flex-elementtiä venymästä ruudun yli, jolloin kontrollit säilyvät näkyvillä! */
+        #video-player-container.fullscreen-mode video { flex: 1; min-height: 0; max-height: 100%; object-fit: contain; background: #000; margin-bottom: 10px; }
+        
+        #mini-map-wrapper { position: absolute; top: 60px; right: 30px; width: 350px; height: 250px; background: #111; border: 2px solid var(--accent); border-radius: 8px; display: none; flex-direction: column; z-index: 10005; resize: both; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.8); }
+        #mini-map-header { background: #222; padding: 5px 10px; cursor: move; display: flex; justify-content: space-between; align-items: center; font-size: 12px; font-weight: bold; border-bottom: 1px solid #444; user-select: none; }
+        #mini-map { flex: 1; width: 100%; height: 100%; background: #000; }
+        /* -------------------------------------- */
         
         #lightbox { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.95); z-index: 9999; flex-direction: column; align-items: center; justify-content: center; }
         .lb-media { max-width: 90vw; max-height: 85vh; border: 2px solid var(--accent); border-radius: 4px; box-shadow: 0 0 20px rgba(0,0,0,0.8); }
@@ -108,9 +118,22 @@
         </div>
 
         <div id="video-player-container">
-            <button onclick="suljeVideo()" style="float:right; background:red; color:white; border:none; cursor:pointer; padding:5px 10px;">X</button>
-            <div id="video-title" style="font-weight: bold; margin-bottom: 5px; font-size:12px;">Video</div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <div id="video-title" style="font-weight: bold; font-size:14px; text-shadow: 0 0 5px #000;">Video</div>
+                <div style="display: flex; gap: 5px;">
+                    <button onclick="toggleVideoFullscreen()" id="fs-btn" style="background:#3498db; color:white; border:none; cursor:pointer; padding:5px 10px; border-radius:4px; font-weight:bold;">⛶ Koko näyttö</button>
+                    <button onclick="suljeVideo()" style="background:#e74c3c; color:white; border:none; cursor:pointer; padding:5px 10px; border-radius:4px; font-weight:bold;">✖</button>
+                </div>
+            </div>
             <video id="active-video" controls></video>
+            
+            <div id="mini-map-wrapper">
+                <div id="mini-map-header">
+                    <span>📍 Sijaintikartta (Raahaa ja Venytä)</span>
+                    <button onclick="document.getElementById('mini-map-wrapper').style.display='none'" style="background:none; border:none; color:white; cursor:pointer; font-weight:bold;">✖</button>
+                </div>
+                <div id="mini-map"></div>
+            </div>
         </div>
     </div>
 
@@ -179,6 +202,15 @@
     let aktiivinenSiirtoTila = false; 
     let siirrettavatPolut = [];
     
+    // Minimap ja taustakartan seuranta
+    let isVideoFullscreen = false;
+    let miniMapObj = null;
+    let miniMapLayer = null;
+    let miniDroneMarker = null;
+    let miniMapRouteLayer = null; // KORJAUS 2: Reittimuuttuja
+    let miniMapKiinteistoLayer = null; // UUSI: Kiinteistörajojen muuttuja
+    let activeBaseLayerName = "OpenStreetMap";
+    
     // PiP-IKKUNA
     let pipViive;
     const pipTooltip = L.tooltip({
@@ -219,14 +251,16 @@
     const mmlKiinteisto = L.tileLayer(mmlWmtsUrl.replace('{layer}', 'kiinteistojaotus'), { minZoom: 13, maxZoom: 18, zIndex: 1000, attribution: 'Maanmittauslaitos' });
     const mmlIlmakuva = L.tileLayer(mmlWmtsUrl.replace('{layer}', 'ortokuva'), { maxZoom: 18, attribution: 'Maanmittauslaitos' });
 
-    const layerControl = L.control.layers({"OpenStreetMap": osmLayer, "MML Maastokartta": mmlMaasto, "MML Taustakartta": mmlTausta, "MML Ilmakuva": mmlIlmakuva}, {"🔴 Kiinteistörajat (Zoomaa lähelle)": mmlKiinteisto}, { collapsed: false }).addTo(map);    map.addLayer(markerClusterGroup);
+    const layerControl = L.control.layers({"OpenStreetMap": osmLayer, "MML Maastokartta": mmlMaasto, "MML Taustakartta": mmlTausta, "MML Ilmakuva": mmlIlmakuva}, {"🔴 Kiinteistörajat (Zoomaa lähelle)": mmlKiinteisto}, { collapsed: false }).addTo(map);   
+    map.addLayer(markerClusterGroup);
     mmlKiinteisto.addTo(map);
+
+    map.on('baselayerchange', function(e) { activeBaseLayerName = e.name; });
 
     let ilmakuvaTasot = {};
 
     function lataaData() {
         fetch('/api/data').then(r => r.json()).then(data => {
-            // POMMINKESTÄVÄ KORJAUS 1: Siivotaan polut turvallisiksi jo täällä
             kaikkiData = data.map(item => {
                 if(item.path) item.path = item.path.replace(/\\/g, '/');
                 return item;
@@ -388,7 +422,7 @@
         }
     }
 
-// ==========================================
+    // ==========================================
     // KARTAN PÄIVITYS JA KUUNTELU
     // ==========================================
 
@@ -401,11 +435,9 @@
         reittiViivat.forEach(l => map.removeLayer(l));
         reittiViivat = [];
         
-// POMMINKESTÄVÄ KORJAUS 2: Turvallinen arvojen haku jos elementtiä ei löydy
         const locFilter = document.querySelector('input[name="locFilter"]:checked')?.value || 'all';
         const typeFilter = document.querySelector('input[name="typeFilter"]:checked')?.value || 'all';
         
-        // 1. Selvitetään mitkä vuodet on ruksitettu karttatasovalikosta
         let valitutVuodetKartalla = new Set();
         for (let y = 2010; y <= 2026; y++) {
             if (ilmakuvaTasot[y] && map.hasLayer(ilmakuvaTasot[y])) {
@@ -418,8 +450,6 @@
         const suodatettu = kaikkiData.filter(item => {
             if (item.year && item.year >= 2010 && item.year <= 2026) loydetytVuodet.add(item.year);
             
-            // 2. VUOSISUODATUS: Jos vuosia on valittu, näytetään vain ne kuvat. 
-            // Jos yhtään vuotta ei ole valittu, näytetään kaikki.
             if (valitutVuodetKartalla.size > 0 && (!item.year || !valitutVuodetKartalla.has(item.year))) {
                 return false;
             }
@@ -440,7 +470,6 @@
             return true;
         });
 
-        // 3. Lisätään valikkoon vain puuttuvat vuodet (ei poisteta vanhoja, jotta raksit eivät katoa)
         Array.from(loydetytVuodet).sort().forEach(vuosi => {
             if (!ilmakuvaTasot[vuosi]) {
                 ilmakuvaTasot[vuosi] = L.tileLayer.wms(mmlOrtoWmsUrl, { layers: 'ortokuva', TIME: vuosi, format: 'image/jpeg', transparent: false, version: '1.3.0', attribution: 'Maanmittauslaitos', zIndex: 10 });
@@ -451,13 +480,11 @@
         rakennaLista(suodatettu, 'all-file-list', 'right-count');
 
         suodatettu.forEach(item => {
-            // POMMINKESTÄVÄ KORJAUS 3: Käsitellään kohteet suojatussa laatikossa
             try {
                 if (item.lat && item.lng) {
                     let onValittu = valitutKuvat.has(item.path);
                     let markerClass = onValittu ? 'custom-div-icon marker-selected' : 'custom-div-icon';
 
-                    // Videot pidetään videokamerana, kuvat muutetaan oranssiksi palloksi
                     let markerHtml = item.type === 'video' 
                         ? `<div class="marker-bg" style="font-size:24px; width:30px; height:30px; display:flex; align-items:center; justify-content:center;">🎥</div>`
                         : `<div class="marker-bg" style="width:20px; height:20px; background-color:#ff8800; border-radius:50%; border:2px solid #fff; box-shadow:0 0 5px rgba(0,0,0,0.5);"></div>`;
@@ -525,7 +552,6 @@
                             map.openTooltip(pipTooltip);
                         }
 
-                        // POMMINKESTÄVÄ KORJAUS 4: querySelectorAll korvattu turvallisemmalla listan selaamisella
                         document.querySelectorAll('.list-item').forEach(el => {
                             if(el.getAttribute('data-path') === item.path) {
                                 el.classList.add('is-hovered');
@@ -584,7 +610,7 @@
                 console.error("Virhe ladattaessa merkkiä kartalle:", item.path, e);
             }
         });
-		paivitaNakyvat();
+        paivitaNakyvat();
     }
 
 function rakennaLista(lista, containerId, countId) {
@@ -601,36 +627,28 @@ function rakennaLista(lista, containerId, countId) {
 
             div.innerHTML = `<span style="font-size:16px;">${item.type === 'video' ? '🎥' : '📷'}</span> <span style="font-size:12px; word-break:break-all;">${escapeHtmlAttr(item.name)}</span>`;
             
-            // Klikkaus avaa kuvan
             div.onclick = () => {
                 if (item.lat && item.lng) map.setView([item.lat, item.lng], 16);
                 avaaMedia(item.path, item.type, lista); 
             };
 
-            // TÄSSÄ UUSI LISÄYS: Hiiri menee listan kohteen päälle
             div.onmouseenter = () => {
                 const marker = kaikkiMarkeritObjektit[item.path];
                 if (marker) {
-                    // 1. Kysytään yleiseltä klusteriryhmältä, onko tämä merkki piilossa
                     const parent = markerClusterGroup.getVisibleParent(marker);
-                    
-                    // Jos merkki on piilossa klusteripallon sisällä, räjäytetään pallo auki
                     if (parent && parent !== marker && typeof parent.spiderfy === 'function') {
                         parent.spiderfy();
                     }
-
-                    // 2. Annetaan animaatiolle 50ms aikaa tapahtua, ennen kuin laukaistaan PiP
                     setTimeout(() => {
-                        marker.fire('mouseover'); // Laukaisee karttamerkin PiP-ikkunan
+                        marker.fire('mouseover'); 
                     }, 50);
                 }
             };
             
-            // TÄSSÄ UUSI LISÄYS: Hiiri poistuu listan kohteen päältä
             div.onmouseleave = () => {
                 const marker = kaikkiMarkeritObjektit[item.path];
                 if (marker) {
-                    marker.fire('mouseout'); // Piilottaa PiP-ikkunan viiveellä
+                    marker.fire('mouseout');
                 }
             };
 
@@ -658,23 +676,17 @@ function avaaMedia(path, type, sourceList = null) {
         if (type === 'video') {
             soitaVideo(item);
         } else {
-            // TÄSSÄ UUSI LOGIIKKA
             if (sourceList) {
-                // Jos tultiin listan kautta (vasen tai oikea paneeli), otetaan selauslistaksi kaikki sen listan kuvat
                 nykyinenKuvaLista = sourceList.filter(d => d.type !== 'video');
             } else if (item.lat && item.lng) {
-                // Jos tultiin kartan ikonia klikkaamalla, näytetään vain samassa pisteessä olevat (vanha logiikka)
                 nykyinenKuvaLista = kaikkiData.filter(d => d.type !== 'video' && d.lat === item.lat && d.lng === item.lng);
             } else {
                 nykyinenKuvaLista = [item];
             }
             
             if (nykyinenKuvaLista.length === 0) nykyinenKuvaLista = [item];
-            
-            // Etsitään monesko klikattu kuva on uudella listalla
             nykyinenKuvaIndeksi = nykyinenKuvaLista.findIndex(d => d.path === path);
             
-            // Varmistus: jos klikattua kuvaa ei löydykään (esim. pelkkä video), näytetään ainakin se itse
             if (nykyinenKuvaIndeksi === -1) {
                 nykyinenKuvaLista = [item];
                 nykyinenKuvaIndeksi = 0;
@@ -738,32 +750,151 @@ function avaaMedia(path, type, sourceList = null) {
         const p1 = activeItem.route[idx1], p2 = activeItem.route[idx2];
         if (p1 && p2) {
             const lat = p1.lat + (p2.lat - p1.lat) * factor, lng = p1.lng + (p2.lng - p1.lng) * factor;
+            
             droneMarker.setLatLng([lat, lng]);
+            
             if (Math.hypot(p2.lat - p1.lat, p2.lng - p1.lng) > 0.000001 && idx1 !== idx2) {
                  viimeAngle = Math.atan2(Math.cos(Math.PI / 180 * p1.lat) * (p2.lng - p1.lng), p2.lat - p1.lat) * 180 / Math.PI;
             }
             if (document.getElementById('drone-pointer')) document.getElementById('drone-pointer').style.transform = `rotate(${viimeAngle}deg)`;
+            
+            // Paivita minimap
+            if (miniMapObj && isVideoFullscreen) {
+                miniDroneMarker.setLatLng([lat, lng]);
+                // KORJAUS 3: Minikartta voi seurata hieman pehmeämmin
+                if (document.getElementById('mini-drone-pointer')) {
+                    document.getElementById('mini-drone-pointer').style.transform = `rotate(${viimeAngle}deg)`;
+                }
+            }
         }
         if (isPlaying) animationFrameId = requestAnimationFrame(paivitaDrone);
     }
 
     function soitaVideo(item) {
         if (!item || !item.route) return;
+        
+        if (isPlaying) { v.pause(); cancelAnimationFrame(animationFrameId); }
+
         activeItem = item;
         v.src = '/media/' + escapeHtmlAttr(item.path);
-        document.getElementById('video-player-container').style.display = 'block';
+        
+        const container = document.getElementById('video-player-container');
+        if(!isVideoFullscreen) {
+            container.style.top = "20px";
+            container.style.left = "20px";
+            container.style.display = 'block';
+        } else {
+            container.style.display = 'flex';
+            alustaMiniMap(); // Päivittää reitin suoraan uuteen videoon
+        }
+        
         document.getElementById('video-title').innerText = item.name;
         droneMarker.setLatLng([item.route[0].lat, item.route[0].lng]).addTo(map);
         v.play();
     }
 
-    function suljeVideo() { v.pause(); activeItem = null; document.getElementById('video-player-container').style.display = 'none'; map.removeLayer(droneMarker); }
+    function suljeVideo() { 
+        v.pause(); activeItem = null; 
+        document.getElementById('video-player-container').style.display = 'none'; 
+        if (isVideoFullscreen) toggleVideoFullscreen();
+        map.removeLayer(droneMarker); 
+    }
+
+    // --- VIDEON KOKO NÄYTTÖ & KARTTA IKKUNA ---
+    function toggleVideoFullscreen() {
+        const container = document.getElementById('video-player-container');
+        const fsBtn = document.getElementById('fs-btn');
+        isVideoFullscreen = !isVideoFullscreen;
+        
+        if (isVideoFullscreen) {
+            container.classList.add('fullscreen-mode');
+            container.style.display = 'flex'; // Pakotetaan CSS flex, jotta kontrollit asettuvat oikein
+            document.getElementById('mini-map-wrapper').style.display = 'flex';
+            fsBtn.innerText = "◱ Palauta";
+            alustaMiniMap();
+        } else {
+            container.classList.remove('fullscreen-mode');
+            container.style.display = 'block';
+            document.getElementById('mini-map-wrapper').style.display = 'none';
+            fsBtn.innerText = "⛶ Koko näyttö";
+        }
+    }
+
+function alustaMiniMap() {
+        if (!miniMapObj) {
+            miniMapObj = L.map('mini-map', { zoomControl: false, attributionControl: false }).setView([62.89, 27.68], 15);
+            miniDroneMarker = L.marker([0,0], { icon: L.divIcon({ html: '<div class="drone-wrapper" style="transform:scale(0.8)"><div class="drone-arrow" id="mini-drone-pointer"></div></div>', className: '', iconSize: [32, 32], iconAnchor: [16, 16], zIndexOffset: 1000 }) }).addTo(miniMapObj);
+            
+            raahaaElementtia(document.getElementById('mini-map-wrapper'), document.getElementById('mini-map-header'));
+            new ResizeObserver(() => { miniMapObj.invalidateSize(); }).observe(document.getElementById('mini-map-wrapper'));
+        }
+
+        if (miniMapLayer) miniMapObj.removeLayer(miniMapLayer);
+        
+        const apiKey = document.getElementById('api-key-input').value;
+        const mmlMiniUrl = `https://avoin-karttakuva.maanmittauslaitos.fi/avoin/wmts/1.0.0/{layer}/default/WGS84_Pseudo-Mercator/{z}/{y}/{x}.png?api-key=${apiKey}`;
+        
+        if (activeBaseLayerName === "MML Maastokartta") miniMapLayer = L.tileLayer(mmlMiniUrl.replace('{layer}', 'maastokartta'));
+        else if (activeBaseLayerName === "MML Taustakartta") miniMapLayer = L.tileLayer(mmlMiniUrl.replace('{layer}', 'taustakartta'));
+        else if (activeBaseLayerName === "MML Selkokartta") miniMapLayer = L.tileLayer(mmlMiniUrl.replace('{layer}', 'selkokartta'));
+        else if (activeBaseLayerName === "MML Ilmakuva") miniMapLayer = L.tileLayer(mmlMiniUrl.replace('{layer}', 'ortokuva'));
+        else miniMapLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
+        
+        miniMapLayer.addTo(miniMapObj);
+
+        // --- UUSI LOGIIKKA: KOPIOIDAAN KIINTEISTÖRAJAT ---
+        if (miniMapKiinteistoLayer) {
+            miniMapObj.removeLayer(miniMapKiinteistoLayer);
+            miniMapKiinteistoLayer = null;
+        }
+        
+        // Tarkistetaan onko pääkartassa "mmlKiinteisto" -taso aktiivisena
+        if (map.hasLayer(mmlKiinteisto)) {
+            miniMapKiinteistoLayer = L.tileLayer(mmlMiniUrl.replace('{layer}', 'kiinteistojaotus'), { 
+                minZoom: 13, 
+                maxZoom: 18, 
+                zIndex: 1000 
+            }).addTo(miniMapObj);
+        }
+        // --------------------------------------------------
+
+        if (miniMapRouteLayer) {
+            miniMapObj.removeLayer(miniMapRouteLayer);
+            miniMapRouteLayer = null;
+        }
+        
+        if (activeItem && activeItem.route) {
+            let latlngs = activeItem.route.map(p => [p.lat, p.lng]);
+            miniMapRouteLayer = L.polyline(latlngs, {color: 'red', weight: 4, opacity: 0.7}).addTo(miniMapObj);
+            
+            miniMapObj.fitBounds(miniMapRouteLayer.getBounds(), {padding: [15, 15]});
+        }
+
+        setTimeout(() => miniMapObj.invalidateSize(), 100);
+    }
+
+    function raahaaElementtia(el, header) {
+        let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+        header.onmousedown = (e) => {
+            e.preventDefault();
+            pos3 = e.clientX; pos4 = e.clientY;
+            document.onmouseup = () => { document.onmouseup = null; document.onmousemove = null; };
+            document.onmousemove = (e) => {
+                e.preventDefault();
+                pos1 = pos3 - e.clientX; pos2 = pos4 - e.clientY;
+                pos3 = e.clientX; pos4 = e.clientY;
+                el.style.top = (el.offsetTop - pos2) + "px";
+                el.style.left = (el.offsetLeft - pos1) + "px";
+                el.style.right = 'auto'; 
+            };
+        };
+    }
+    // --------------------------------------------------------
+
 function paivitaNakyvat() {
-          // 1. Haetaan nykyiset suodatinarvot
           const locFilter = document.querySelector('input[name="locFilter"]:checked')?.value || 'all';
           const typeFilter = document.querySelector('input[name="typeFilter"]:checked')?.value || 'all';
-             
-          // Selvitetään aktiiviset vuodet (jos käytössä)
+              
           let valitutVuodetKartalla = new Set();
           for (let y = 2010; y <= 2026; y++) {
                     if (ilmakuvaTasot[y] && map.hasLayer(ilmakuvaTasot[y])) {
@@ -773,29 +904,23 @@ function paivitaNakyvat() {
 
     const bounds = map.getBounds();
 
-          // 2. Suodatetaan data samoilla säännöillä kuin karttamerkit
           const nakyvatSuodatetut = kaikkiData.filter(item => {
-                    // A. Sijaintitarkistus (Ymmärtää nyt myös pelkän reitin)
                     let inBounds = false;
                     if (item.lat && item.lng && bounds.contains([item.lat, item.lng])) {
                               inBounds = true;
                     } else if (item.type === 'video' && item.route && item.route.length > 0) {
-            // Jos videolla on reitti, katsotaan osuuko edes yksi reitin piste kartalle
                               inBounds = item.route.some(p => bounds.contains([p.lat, p.lng]));
                     }
                     if (!inBounds) return false;
 
-                    // B. Vuosisuodatus
                     if (valitutVuodetKartalla.size > 0 && (!item.year || !valitutVuodetKartalla.has(item.year))) {
                               return false;
                     }
 
-                    // C. Sijaintisuodatus (Hyväksyy nyt myös pelkän reitin sijainniksi)
                     const hasLoc = !!(item.lat && item.lng) || !!(item.type === 'video' && item.route && item.route.length > 0);
                     if (locFilter === 'has_loc' && !hasLoc) return false;
                     if (locFilter === 'no_loc' && hasLoc) return false;
 
-                    // D. Tyyppisuodatus (JPG / Video / Muut)
                     const ext = (item.path || "").split('.').pop().toLowerCase();
                     const isVideo = item.type === 'video';
                     const isJpg = !isVideo && (ext === 'jpg' || ext === 'jpeg');
@@ -808,7 +933,6 @@ function paivitaNakyvat() {
                     return true;
           });
 
-          // 3. Rakennetaan vasen lista suodatetulla datalla
           rakennaLista(nakyvatSuodatetut, 'local-file-list', 'left-count');
 }
     function tallennaAvain() { fetch('/api/config/key', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key: document.getElementById('api-key-input').value}) }).then(() => alert("Avain tallennettu! Päivitä sivu (F5) ottaaksesi MML-tasot käyttöön.")); }
@@ -816,14 +940,11 @@ function paivitaNakyvat() {
 
     map.on('moveend', paivitaNakyvat);
     lataaData();
-	
-	// TÄMÄ FUNKTIO NÄYTTÄÄ KRYPTO-OSOITTEET
-// AVAAMINEN
+    
 function naytaKrypto() {
     document.getElementById('krypto-modal').style.display = 'flex';
 }
 
-// SULKEMINEN
 function suljeKrypto() {
     document.getElementById('krypto-modal').style.display = 'none';
 }
