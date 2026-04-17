@@ -236,8 +236,13 @@
     }
 
     function escapeHtmlAttr(str) {
-        if (!str) return "";
-        return str.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        if (str == null) return "";
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
 
     // ==========================================
@@ -392,8 +397,8 @@
     // KARTAN PÄIVITYS JA KUUNTELU
     // ==========================================
 
-    map.on('overlayadd', function(e) { if (e.name.includes('Vuosi')) paivitaKartta(); });
-    map.on('overlayremove', function(e) { if (e.name.includes('Vuosi')) paivitaKartta(); });
+    map.on('overlayadd', function(e) { if (typeof e.name === 'string' && e.name.includes('Vuosi')) paivitaKartta(); });
+    map.on('overlayremove', function(e) { if (typeof e.name === 'string' && e.name.includes('Vuosi')) paivitaKartta(); });
 
     function paivitaKartta() {
         markerClusterGroup.clearLayers();
@@ -453,7 +458,7 @@
         suodatettu.forEach(item => {
             // POMMINKESTÄVÄ KORJAUS 3: Käsitellään kohteet suojatussa laatikossa
             try {
-                if (item.lat && item.lng) {
+                if (item.lat != null && item.lng != null) {
                     let onValittu = valitutKuvat.has(item.path);
                     let markerClass = onValittu ? 'custom-div-icon marker-selected' : 'custom-div-icon';
 
@@ -600,7 +605,7 @@
 
             div.innerHTML = `<span style="font-size:16px;">${item.type === 'video' ? '🎥' : '📷'}</span> <span style="font-size:12px; word-break:break-all;">${escapeHtmlAttr(item.name)}</span>`;
             div.onclick = () => {
-                if (item.lat && item.lng) map.setView([item.lat, item.lng], 16);
+                if (item.lat != null && item.lng != null) map.setView([item.lat, item.lng], 16);
                 avaaMedia(item.path, item.type);
             };
             c.appendChild(div);
@@ -712,7 +717,7 @@
     }
 
     function suljeVideo() { v.pause(); activeItem = null; document.getElementById('video-player-container').style.display = 'none'; map.removeLayer(droneMarker); }
-    function paivitaNakyvat() { rakennaLista(kaikkiData.filter(d => d.lat && map.getBounds().contains([d.lat, d.lng])), 'local-file-list', 'left-count'); }
+    function paivitaNakyvat() { rakennaLista(kaikkiData.filter(d => d.lat != null && d.lng != null && map.getBounds().contains([d.lat, d.lng])), 'local-file-list', 'left-count'); }
     
     function tallennaAvain() { fetch('/api/config/key', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key: document.getElementById('api-key-input').value}) }).then(() => alert("Avain tallennettu! Päivitä sivu (F5) ottaaksesi MML-tasot käyttöön.")); }
     async function valitseKansio() { const res = await fetch('/api/config/pick_folder'); const data = await res.json(); if (data.path) { const saveRes = await fetch('/api/config/add_folder', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({path: data.path}) }); if (saveRes.ok) { alert("Kansio lisätty: " + data.path); lataaData(); } } }
